@@ -1602,7 +1602,7 @@ const App = (() => {
     renderTabs();
     go('home');
     // 演示源提示
-    setTimeout(() => toast('提示:方向键导航,Enter 确认;在「设置」可添加自己的采集源'), 800);
+    setTimeout(() => toast('提示:方向键导航,Enter 确认;在「播放源」可添加自己的采集源'), 800);
   }
 
   return { boot, go, goDetail, resumeHist, openFromRecord, playVod, renderTabs };
