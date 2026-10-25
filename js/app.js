@@ -64,6 +64,7 @@ const App = (() => {
   function go(id) {
     tab = id;
     renderTabs();
+    if (id !== 'live' && window.__lvStop) { try { window.__lvStop(); } catch (e) {} }
     if (id === 'home') pageHome();
     else if (id === 'search') pageSearch();
     else if (id === 'live') pageLive();
@@ -89,6 +90,7 @@ const App = (() => {
 
     try {
       if (!homeCache.has(src.id)) homeCache.set(src.id, await API.home(src));
+      if (tab !== 'home') return;   // 等待期间用户已切走,不再抢占视图
       const { classes, latest } = homeCache.get(src.id);
 
       const root = UI.el('<div></div>');
@@ -408,7 +410,7 @@ const App = (() => {
   }
 
   /* ============ 直播(IPTV)页 ============ */
-  const liveState = { pl: null, groups: [], gIdx: 0, chIdx: -1, showImport: false };
+  const liveState = { pl: null, groups: [], gIdx: 0, chIdx: -1, showImport: false, favOnly: false, q: '' };
 
   async function pageLive() {
     view().innerHTML = `<div class="page-title">直播 <span class="sub">IPTV · M3U/txt 源 · EPG 节目单</span></div>` + UI.spinner();
@@ -482,6 +484,9 @@ const App = (() => {
           : '未解析到频道(检查格式)');
       }
       liveState.groups = groups;
+      /* 全源频道统一编号(OSD 显示 CH 001…,跨分组稳定) */
+      let __no = 0;
+      groups.forEach(g => g.channels.forEach(c => { __no++; c.__no = __no; }));
     } catch (e) {
       view().innerHTML = '';
       view().appendChild(UI.empty('直播源加载失败:' + (e.message || e), '重试', () => { liveState.pl = null; pageLive(); }));
@@ -535,69 +540,361 @@ const App = (() => {
     };
   }
 
+  /* ============ 直播页·设计稿定稿:三栏布局 + 内嵌播放器 ============ */
+  const LV_FAV_KEY = 'tvw_live_fav';
+  const LV_WATCH_KEY = 'tvw_live_watchdog';
+  let lvHls = null, lvVideo = null, lvWatch = null, lvCur = null; // lvCur = {ch, group, line}
+  function lvFavs() { try { return JSON.parse(localStorage.getItem(LV_FAV_KEY) || '[]'); } catch (e) { return []; } }
+  function lvToggleFav(name) {
+    const f0 = lvFavs();
+    let f = f0.filter(x => x !== name);
+    if (f.length === f0.length) f.unshift(name);
+    localStorage.setItem(LV_FAV_KEY, JSON.stringify(f.slice(0, 100)));
+  }
+  function lvWatchdogOn() { return localStorage.getItem(LV_WATCH_KEY) !== 'off'; }
+  function lvStop() {
+    if (lvHls) { try { lvHls.destroy(); } catch (e) {} lvHls = null; }
+    if (lvVideo) { try { lvVideo.pause(); lvVideo.removeAttribute('src'); lvVideo.load(); } catch (e) {} lvVideo = null; }
+    clearTimeout(lvWatch);
+    lvCur = null;
+  }
+  window.__lvStop = lvStop;
+  const lvLogoTxt = name => (String(name).replace(/[^A-Za-z0-9\u4e00-\u9fa5]/g, '').toUpperCase().slice(0, 5)) || 'TV';
+  const lvLogoColor = name => { let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360; return `linear-gradient(135deg,hsl(${h},62%,46%),hsl(${h},62%,30%))`; };
+  const lvPad3 = n => String(n).padStart(3, '0');
+
   function renderLiveUI(pls, plObj) {
-    view().innerHTML = '';
-    const root = UI.el('<div></div>');
-    // 源选择 + 管理
-    const top = UI.el('<div class="cat-row" style="margin-bottom:6px"></div>');
-    pls.forEach(pl => {
-      const b = UI.el(`<button class="cat${pl.id === plObj.id ? ' active' : ''}" data-f tabindex="-1">${pl.name}</button>`);
-      b.onclick = () => { liveState.pl = pl.id; Live.setCurrentPl(pl.id); liveState.gIdx = 0; liveState.chIdx = -1; pageLive(); };
-      top.appendChild(b);
-    });
-    const add = UI.el('<button class="cat" data-f tabindex="-1">+ 导入源</button>');
-    add.onclick = () => { liveState.showImport = true; pageLive(); };
-    top.appendChild(add);
-    const del = UI.el('<button class="cat" data-f tabindex="-1">退订当前源</button>');
-    del.onclick = () => { Live.removePlaylist(plObj.id); liveState.pl = null; pageLive(); toast('已退订'); };
-    top.appendChild(del);
-    root.appendChild(top);
-    // 分组chips
-    const gRow = UI.el('<div class="cat-row"></div>');
-    liveState.groups.forEach((g, i) => {
-      const b = UI.el(`<button class="cat${i === liveState.gIdx ? ' active' : ''}" data-f tabindex="-1">${g.name}(${g.channels.length})</button>`);
-      b.onclick = () => { liveState.gIdx = i; liveState.chIdx = -1; renderLiveUI(pls, plObj); };
-      gRow.appendChild(b);
-    });
-    root.appendChild(gRow);
-    // 频道列表(带EPG)
-    const g = liveState.groups[liveState.gIdx];
-    const rows = UI.el('<div class="list-rows"></div>');
-    g.channels.forEach((ch, ci) => {
-      const lineBadge = (ch.urls && ch.urls.length > 1) ? ` <span style="color:var(--muted);font-size:11px">${ch.urls.length}线路</span>` : '';
-      const row = UI.el(`<div class="list-row${ci === liveState.chIdx ? ' active-src' : ''}" data-f tabindex="-1">
-        <span style="font-size:22px">📺</span>
-        <div class="li-main">
-          <div class="li-name">${ch.name}${lineBadge}</div>
-          <div class="li-sub epg-line" style="color:var(--muted)">节目单加载中…</div>
+    view().innerHTML = `
+      <div class="lv-top">
+        <button class="sr-back" data-f tabindex="-1" title="返回首页" id="lv-back">←</button>
+        <div class="lv-title">直播<span class="sub">IPTV · m3u / txt · EPG 节目单</span></div>
+        <div class="lv-srcs" id="lv-srcs"></div>
+        <button class="src-add" id="lv-add" data-f tabindex="-1">＋ 添加 m3u / txt 源</button>
+        <div class="lv-search" id="lv-search"><span>🔍</span><input id="lv-q" data-f tabindex="-1" placeholder="搜频道 / 频道号" style="border:none;background:transparent;outline:none;color:var(--text);font-family:inherit;font-size:13px;width:110px"></div>
+        <button class="lv-set" id="lv-set" data-f tabindex="-1" title="导入 / 退订 / 看门狗">⚙</button>
+      </div>
+      <div class="lv-setrow" id="lv-setrow" style="display:none"></div>
+      <div class="lv-body">
+        <div class="lv-groups">
+          <div class="g-h">频道分组</div>
+          <div id="lv-grps"></div>
+          <div class="g-h" style="margin-top:18px">看门狗</div>
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+            <button class="lv-badge ok" id="lv-wdog" data-f tabindex="-1" style="cursor:pointer">45s 未出画自动切线路 · 开</button>
+            <span class="lv-badge" id="lv-merge">同名频道多线路合并</span>
+          </div>
         </div>
-        <div class="li-ops"><button class="mini-btn" data-op="play">▶ 播放</button></div>
+        <div class="lv-main">
+          <div class="lv-screen" id="lv-screen">
+            <video id="lv-video" playsinline style="display:none"></video>
+            <div class="lv-ph" id="lv-ph">← 在右侧选择一个频道开始观看<br><span style="font-size:12px;color:var(--muted)">点击画面可取消静音;「⛶ 全屏」可使用完整播放器(弹幕 / 字幕 / 画质)</span></div>
+            <span class="lv-live" id="lv-livebit" style="display:none"><i></i>LIVE</span>
+            <div class="lv-osd" id="lv-osd" style="display:none">
+              <div class="no" id="lv-osd-no"></div>
+              <div class="nm" id="lv-osd-nm"></div>
+              <div class="epg-now" id="lv-osd-epg"></div>
+              <div class="epg-bar"><i id="lv-osd-bar" style="width:0%"></i></div>
+              <div class="epg-t"><span id="lv-osd-t0"></span><span id="lv-osd-t1"></span></div>
+            </div>
+            <div class="lv-badges" id="lv-badges" style="display:none"></div>
+            <button class="lv-fs" id="lv-fs" data-f tabindex="-1" style="display:none">⛶ 全屏播放</button>
+          </div>
+          <div class="lv-epg">
+            <div class="e-head"><b id="lv-epg-title">节目单</b><span class="e-date" id="lv-epg-date"></span><span class="e-more">EPG 数据:51zmt · 当天缓存</span></div>
+            <div class="e-timeline" id="lv-epg-tl"><div class="hint" style="padding:6px 2px">选择频道后展示当天节目单</div></div>
+          </div>
+        </div>
+        <div class="lv-chans">
+          <div class="c-h"><b id="lv-ch-title">频道</b><span class="c-cnt" id="lv-ch-cnt"></span><span class="c-fav" id="lv-favonly" data-f tabindex="-1">只看收藏</span></div>
+          <div id="lv-chlist"></div>
+        </div>
+      </div>`;
+
+    view().querySelector('#lv-back').onclick = () => go('home');
+    view().querySelector('#lv-add').onclick = () => { liveState.showImport = true; pageLive(); };
+    view().querySelector('#lv-set').onclick = () => {
+      const row = view().querySelector('#lv-setrow');
+      if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+      row.style.display = '';
+      row.innerHTML = '';
+      const imp = UI.el('<button class="cat" data-f tabindex="-1">📥 导入新源</button>');
+      imp.onclick = () => { liveState.showImport = true; pageLive(); };
+      const del = UI.el('<button class="cat" data-f tabindex="-1">🗑 退订当前源</button>');
+      del.onclick = () => { Live.removePlaylist(plObj.id); liveState.pl = null; liveState.gIdx = 0; liveState.chIdx = -1; pageLive(); toast('已退订'); };
+      const wd = UI.el(`<button class="cat${lvWatchdogOn() ? ' active' : ''}" data-f tabindex="-1">⏱ 看门狗自动切线路 ${lvWatchdogOn() ? '开' : '关'}</button>`);
+      wd.onclick = () => { localStorage.setItem(LV_WATCH_KEY, lvWatchdogOn() ? 'off' : 'on'); if (lvCur) lvPlayInline(lvCur.ch, lvCur.group, lvCur.line); renderLiveUI(pls, plObj); };
+      row.appendChild(imp); row.appendChild(del); row.appendChild(wd);
+    };
+    view().querySelector('#lv-wdog').onclick = () => { localStorage.setItem(LV_WATCH_KEY, lvWatchdogOn() ? 'off' : 'on'); if (lvCur) lvPlayInline(lvCur.ch, lvCur.group, lvCur.line); renderLiveUI(pls, plObj); };
+    view().querySelector('#lv-favonly').onclick = () => { liveState.favOnly = !liveState.favOnly; renderLiveUI(pls, plObj); };
+    view().querySelector('#lv-q').addEventListener('input', e => { liveState.q = e.target.value.trim(); liveState.gIdx = liveState.q ? -1 : liveState.gIdx; lvRenderChans(pls, plObj); });
+
+    /* 源 chips */
+    const srcsEl = view().querySelector('#lv-srcs');
+    pls.forEach(pl => {
+      const isCur = pl.id === plObj.id;
+      const cnt = isCur ? liveState.groups.reduce((s, g) => s + g.channels.length, 0) : null;
+      const chip = UI.el(`<span class="src-chip${isCur ? ' cur' : ''}" data-f tabindex="-1"><span class="av" style="${lvLogoColor(pl.name)}">${escHtml((pl.name || '?')[0])}</span>${escHtml(pl.name)}<span class="dot" style="background:var(--${isCur ? 'green' : 'muted'})"></span>${cnt != null ? `<span class="ms">${cnt} 频道</span>` : ''}</span>`);
+      chip.style.cursor = 'pointer';
+      chip.onclick = () => { if (pl.id !== plObj.id) { lvStop(); liveState.pl = pl.id; Live.setCurrentPl(pl.id); liveState.gIdx = 0; liveState.chIdx = -1; pageLive(); } };
+      srcsEl.appendChild(chip);
+    });
+
+    /* 全屏播放按钮 */
+    view().querySelector('#lv-fs').onclick = () => {
+      if (!lvCur) return;
+      const { ch, group, line } = lvCur;
+      lvStop();
+      playLive(ch, group, line);
+    };
+
+    lvRenderGroups(pls, plObj);
+    lvRenderChans(pls, plObj);
+    /* 恢复上一次选中频道到 OSD(不自动播放) */
+    const lastCh = liveState.groups[liveState.gIdx] && liveState.groups[liveState.gIdx].channels[liveState.chIdx];
+    if (lastCh) lvShowOsdOnly(lastCh, liveState.groups[liveState.gIdx]);
+    KeyNav.focusFirst();
+  }
+
+  function lvRenderGroups(pls, plObj) {
+    const box = view().querySelector('#lv-grps');
+    if (!box) return;
+    box.innerHTML = '';
+    liveState.groups.forEach((g, i) => {
+      const b = UI.el(`<button class="grp${i === liveState.gIdx && !liveState.q ? ' on' : ''}" data-f tabindex="-1"><span class="g-name">${escHtml(g.name)}</span><span class="g-n">${g.channels.length}</span></button>`);
+      b.onclick = () => { liveState.gIdx = i; liveState.q = ''; const q = view().querySelector('#lv-q'); if (q) q.value = ''; lvRenderGroups(pls, plObj); lvRenderChans(pls, plObj); };
+      box.appendChild(b);
+    });
+    const total = liveState.groups.reduce((s, g) => s + g.channels.length, 0);
+    const mergedEl = view().querySelector('#lv-merge');
+    if (mergedEl) mergedEl.textContent = `同名频道多线路合并 · ${total}`;
+  }
+
+  function lvVisibleChans() {
+    const favs = lvFavs();
+    if (liveState.q) {
+      const q = liveState.q.toLowerCase();
+      const out = [];
+      liveState.groups.forEach(g => g.channels.forEach(c => {
+        if (String(c.name).toLowerCase().includes(q) || String(c.__no).includes(q)) out.push({ ch: c, group: g });
+      }));
+      return out;
+    }
+    if (liveState.favOnly) {
+      const out = [];
+      liveState.groups.forEach(g => g.channels.forEach(c => { if (favs.includes(c.name)) out.push({ ch: c, group: g }); }));
+      return out;
+    }
+    const g = liveState.groups[liveState.gIdx];
+    return g ? g.channels.map(c => ({ ch: c, group: g })) : [];
+  }
+
+  function lvRenderChans(pls, plObj) {
+    const box = view().querySelector('#lv-chlist');
+    if (!box) return;
+    const favs = lvFavs();
+    const titleEl = view().querySelector('#lv-ch-title'), cntEl = view().querySelector('#lv-ch-cnt');
+    const items = lvVisibleChans();
+    if (titleEl) titleEl.textContent = liveState.q ? `搜索「${liveState.q}」` : liveState.favOnly ? '我的收藏' : (liveState.groups[liveState.gIdx] || {}).name || '频道';
+    if (cntEl) cntEl.textContent = `${items.length} 个频道`;
+    box.innerHTML = '';
+    if (!items.length) {
+      box.appendChild(UI.empty(liveState.q ? '没有匹配的频道' : liveState.favOnly ? '还没有收藏频道,点频道右侧的 ☆ 收藏' : '该分组没有频道'));
+      return;
+    }
+    items.forEach(({ ch, group }) => {
+      const isCur = lvCur && lvCur.ch === ch;
+      const isFav = favs.includes(ch.name);
+      const nLines = (ch.urls && ch.urls.length) || 1;
+      const row = UI.el(`<div class="chan${isCur ? ' cur' : ''}" data-f tabindex="-1">
+        <span class="no">${lvPad3(ch.__no || 0)}</span>
+        <span class="logo" style="background:${lvLogoColor(ch.name)}">${escHtml(lvLogoTxt(ch.name))}</span>
+        <div class="c-main"><div class="c-name">${escHtml(ch.name)}</div><div class="c-epg epg-line" style="color:var(--muted)">节目单加载中…</div></div>
+        <div class="c-ops"><span class="lines">${nLines}线路</span><span class="fav${isFav ? ' on' : ''}">${isFav ? '★' : '☆'}</span></div>
       </div>`);
-      row.onclick = e => {
-        if (e.target.dataset && e.target.dataset.op === 'play') { e.stopPropagation(); playLive(ch, g); return; }
-        playLive(ch, g);
+      row.onclick = () => lvPlayInline(ch, group, 0);
+      row.querySelector('.fav').onclick = e => {
+        e.stopPropagation();
+        lvToggleFav(ch.name);
+        row.querySelector('.fav').classList.toggle('on');
+        row.querySelector('.fav').textContent = row.querySelector('.fav').classList.contains('on') ? '★' : '☆';
       };
-      rows.appendChild(row);
-      // EPG 懒加载(可视区才查)
+      box.appendChild(row);
+      /* EPG 懒加载(轻限流) */
+      const ci = box.children.length;
       setTimeout(() => {
         if (!row.isConnected) return;
         Live.fetchEpg(ch.name).then(epg => {
           const line = row.querySelector('.epg-line');
           if (!line || !row.isConnected) return;
-          if (!epg) { line.textContent = '—'; return; }
-          const nn = Live.nowNext(epg);
-          line.textContent = nn && nn.now
-            ? '正在播:' + nn.now.title + '(' + nn.now.start + ')' + (nn.next ? ' · 接下来:' + nn.next.title : '')
+          const nn = epg && Live.nowNext(epg);
+          line.innerHTML = nn && nn.now
+            ? `<b>${escHtml(nn.now.title)}</b> · 正在播${nn.next ? ' · 接下来 ' + escHtml(nn.next.title) : ''}`
             : '暂无节目信息';
-        }).catch(() => {
-          const line = row.querySelector('.epg-line');
-          if (line) line.textContent = '—';
-        });
-      }, ci * 120); // 轻限流
+        }).catch(() => { const line = row.querySelector('.epg-line'); if (line) line.textContent = '—'; });
+      }, ci * 120);
     });
-    root.appendChild(rows);
-    view().appendChild(root);
-    KeyNav.focusFirst();
+  }
+
+  /* OSD 预览:重进页面时回显上次频道信息(不自动播放) */
+  function lvShowOsdOnly(ch, group) {
+    const osd = view().querySelector('#lv-osd');
+    if (!osd) return;
+    osd.style.display = '';
+    view().querySelector('#lv-osd-no').textContent = 'CH ' + lvPad3(ch.__no || 0) + ' · ' + group.name;
+    view().querySelector('#lv-osd-nm').textContent = ch.name;
+    view().querySelector('#lv-osd-epg').textContent = '按播放键开始观看';
+    Live.fetchEpg(ch.name).then(epg => {
+      const nn = epg && Live.nowNext(epg);
+      if (nn && nn.now) {
+        view().querySelector('#lv-osd-epg').innerHTML = '正在播：<b>' + escHtml(nn.now.title) + '</b>' + (nn.next ? ' · 接下来 ' + escHtml(nn.next.title) : '');
+      }
+      lvRenderEpgTimeline(ch, epg);
+    }).catch(() => {});
+  }
+
+  /* ---------- 内嵌播放引擎:HLS + 看门狗切线路 ---------- */
+  function lvPlayInline(ch, group, line) {
+    lvStop();
+    lvCur = { ch: ch, group: group, line: line || 0 };
+    liveState.chIdx = group.channels.indexOf(ch);
+    const urls = (ch.urls && ch.urls.length ? ch.urls : [ch.url]);
+    const idx = Math.min(lvCur.line, urls.length - 1);
+    const fixLive = u => /live\.ottiptv\.cc\/[a-z]+\/\d+$/i.test(u) ? u + '.m3u8' : u;
+    const raw = fixLive(urls[idx]);
+    const url = DB.getConfig().proxyMode ? API.proxied(raw) : raw;
+
+    const video = view().querySelector('#lv-video');
+    if (!video) return;
+    lvVideo = video;
+    video.style.display = '';
+    const ph = view().querySelector('#lv-ph'); if (ph) ph.style.display = 'none';
+    const livebit = view().querySelector('#lv-livebit'); if (livebit) livebit.style.display = '';
+    const fsBtn = view().querySelector('#lv-fs'); if (fsBtn) fsBtn.style.display = '';
+
+    const isHls = /\.m3u8(\?|$)/i.test(url) || /m3u8/i.test(url);
+    if (isHls && window.Hls && Hls.isSupported()) {
+      lvHls = new Hls({ maxBufferLength: 10, enableWorker: true, manifestLoadingMaxRetry: 2, fragLoadingMaxRetry: 4 });
+      lvHls.loadSource(url);
+      lvHls.attachMedia(video);
+      lvHls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) lvNextLine('播放失败'); });
+    } else {
+      video.src = url;
+      video.load();
+    }
+    video.muted = false;
+    video.play().catch(() => { video.muted = true; video.play().catch(() => {}); if (window.toast) toast('已静音自动播放,点击画面取消静音'); });
+    video.onclick = () => { video.muted = !video.muted; if (window.toast) toast(video.muted ? '已静音' : '已取消静音'); };
+
+    lvUpdateBadges(ch, group, idx, urls.length);
+    lvArmWatchdog();
+    /* OSD */
+    const osd = view().querySelector('#lv-osd');
+    if (osd) {
+      osd.style.display = '';
+      view().querySelector('#lv-osd-no').textContent = 'CH ' + lvPad3(ch.__no || 0) + ' · ' + group.name;
+      view().querySelector('#lv-osd-nm').textContent = ch.name;
+    }
+    lvRenderEpgTimeline(ch, null);
+    /* 选中态同步到频道列表 */
+    const rows = view().querySelectorAll('#lv-chlist .chan');
+    rows.forEach(r => r.classList.remove('cur'));
+    let curRow = null;
+    lvVisibleChans().forEach((x, i) => { if (x.ch === ch && rows[i]) curRow = rows[i]; });
+    if (curRow) curRow.classList.add('cur');
+  }
+
+  function lvNextLine(reason) {
+    if (!lvCur) return;
+    const urls = (lvCur.ch.urls && lvCur.ch.urls.length ? lvCur.ch.urls : [lvCur.ch.url]);
+    const next = lvCur.line + 1;
+    if (next < urls.length) {
+      if (window.toast) toast((reason || '线路无响应') + ',切换线路 ' + (next + 1));
+      lvPlayInline(lvCur.ch, lvCur.group, next);
+    } else {
+      if (window.toast) toast((reason || '线路') + ':所有线路均无响应');
+      lvStop();   // 防止后续致命错误重复提示
+    }
+  }
+
+  function lvArmWatchdog() {
+    clearTimeout(lvWatch);
+    if (!lvWatchdogOn()) return;
+    lvWatch = setTimeout(() => {
+      const v = lvVideo;
+      if (!v || !v.isConnected) return;
+      if (v.paused || v.readyState < 2) lvNextLine('45s 未出画');
+    }, 45000);
+  }
+
+  function lvUpdateBadges(ch, group, idx, n) {
+    const box = view().querySelector('#lv-badges');
+    if (!box) return;
+    box.style.display = '';
+    box.innerHTML = '';
+    box.appendChild(UI.el(`<span class="lv-badge ${lvWatchdogOn() ? 'ok' : ''}">看门狗 ${lvWatchdogOn() ? '正常' : '已关'}</span>`));
+    box.appendChild(UI.el(`<span class="lv-badge">线路 ${idx + 1}/${n} · 来源 ${escHtml(group.name)}</span>`));
+  }
+
+  /* ---------- EPG 时间轴:过去 2 档 + 当前(LIVE 进度) + 未来 2 档 ---------- */
+  function lvRenderEpgTimeline(ch, epg) {
+    const tl = view().querySelector('#lv-epg-tl');
+    const titleEl = view().querySelector('#lv-epg-title');
+    if (!tl) return;
+    if (titleEl) titleEl.textContent = '节目单 · ' + ch.name;
+    if (!epg) {
+      Live.fetchEpg(ch.name).then(ep => { if (lvCur && lvCur.ch === ch || !lvCur) lvRenderEpgTimeline(ch, ep); }).catch(() => {
+        if (tl) tl.innerHTML = '<div class="hint" style="padding:6px 2px">EPG 获取失败(51zmt 未收录该频道)</div>';
+      });
+      return;
+    }
+    if (!epg.items || !epg.items.length) {
+      tl.innerHTML = '<div class="hint" style="padding:6px 2px">暂无节目信息(51zmt 未收录该频道)</div>';
+      return;
+    }
+    const toMin = t => { const p = String(t).split(':'); return (+p[0]) * 60 + (+p[1]); };
+    const now = new Date();
+    const curMin = now.getHours() * 60 + now.getMinutes();
+    let nowIdx = -1;
+    epg.items.forEach((it, i) => { if (curMin >= toMin(it.start) && curMin < toMin(it.end)) nowIdx = i; });
+    if (nowIdx < 0) nowIdx = 0;
+    const slots = [];
+    for (let i = nowIdx - 2; i <= nowIdx + 2; i++) {
+      if (i < 0 || i >= epg.items.length) continue;
+      const it = epg.items[i];
+      const s = toMin(it.start), e = toMin(it.end);
+      const isNow = i === nowIdx;
+      const prog = isNow && e > s ? Math.min(100, Math.max(0, (curMin - s) / (e - s) * 100)) : 0;
+      slots.push({ it: it, now: isNow, past: i < nowIdx, prog: prog });
+    }
+    tl.innerHTML = '';
+    slots.forEach(s => {
+      const slot = UI.el(`<div class="e-slot${s.now ? ' now' : ''}${s.past ? ' past' : ''}" data-f tabindex="-1">
+        ${s.now ? '<span class="e-live">LIVE</span>' : ''}
+        <div class="e-t">${escHtml(s.it.start)} – ${escHtml(s.it.end)}</div>
+        <div class="e-n">${escHtml(s.it.title)}</div>
+        ${s.now ? `<div class="e-p"><i style="width:${s.prog.toFixed(0)}%"></i></div>` : ''}
+      </div>`);
+      tl.appendChild(slot);
+    });
+    /* OSD 同步 */
+    const nowIt = epg.items[nowIdx];
+    const nextIt = epg.items[nowIdx + 1];
+    const epgEl = view().querySelector('#lv-osd-epg');
+    if (epgEl && nowIt) {
+      epgEl.innerHTML = '正在播：<b>' + escHtml(nowIt.title) + '</b>' + (nextIt ? ' · 接下来 ' + escHtml(nextIt.title) : '');
+      const s = toMin(nowIt.start), e = toMin(nowIt.end);
+      const prog = e > s ? Math.min(100, Math.max(0, (curMin - s) / (e - s) * 100)) : 0;
+      const bar = view().querySelector('#lv-osd-bar'); if (bar) bar.style.width = prog.toFixed(0) + '%';
+      const t0 = view().querySelector('#lv-osd-t0'); if (t0) t0.textContent = nowIt.start;
+      const t1 = view().querySelector('#lv-osd-t1'); if (t1) t1.textContent = nowIt.end;
+    }
+    const dateEl = view().querySelector('#lv-epg-date');
+    if (dateEl) {
+      const d = new Date();
+      const wk = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+      dateEl.textContent = (d.getMonth() + 1) + '月' + d.getDate() + '日 周' + wk + ' · 当天 EPG 已缓存';
+    }
   }
 
   function playLive(ch, group, startLine) {

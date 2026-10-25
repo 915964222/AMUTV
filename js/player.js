@@ -192,11 +192,6 @@ const Player = (() => {
         <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
         <div class="pl-ctrls">
           <div class="pc-left">
-            <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="kb">S</span></button>
-            <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="kb">E</span></button>
-            <button class="pill" data-act="sniff" data-f tabindex="-1">嗅探<span class="kb">V</span></button>
-          </div>
-          <div class="pc-mid">
             <button class="pc-btn" data-act="prev" title="上一集">${I.prev}</button>
             <button class="pc-btn" data-act="rew" title="快退10秒">${I.rew}</button>
             <button class="pc-btn pc-play" data-act="play" title="暂停/播放">${I.pause}</button>
@@ -209,12 +204,17 @@ const Player = (() => {
               <div class="vol-bar"><i></i></div>
               <span class="vol-pct">100</span>
             </div>
-            <button class="pill" data-act="sub" data-f tabindex="-1">字幕</button>
-            <button class="pill" data-act="q" data-f tabindex="-1">画质</button>
-            <button class="pill" data-act="speed" data-f tabindex="-1">x1</button>
             <button class="pc-btn" data-act="pset" title="设置">${I.more}</button>
             <button class="pc-btn" data-act="fs" title="全屏">${I.fs}</button>
           </div>
+        </div>
+        <div class="pl-chips">
+          <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="kb">E</span></button>
+          <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="kb">S</span></button>
+          <button class="pill" data-act="sniff" data-f tabindex="-1">嗅探<span class="kb">V</span></button>
+          <button class="pill" data-act="sub" data-f tabindex="-1">字幕</button>
+          <button class="pill" data-act="q" data-f tabindex="-1">画质</button>
+          <button class="pill" data-act="speed" data-f tabindex="-1">x1</button>
         </div>
       </div>
     </div>`);
@@ -1072,24 +1072,116 @@ const Player = (() => {
     else renderDmTab(d, body);
   }
 
-  /* --- Tab:选集(含片头片尾标记) --- */
+  /* --- Tab:选集(带图卡片墙:缩略图取帧 + 观看进度标记) --- */
+
+  /* 单集缩略图:隐藏 video 解码一帧 -> canvas JPEG dataURL;失败/超时/跨域污染返回 null */
+  const epThumbCache = new Map();   /* ep.url -> dataURL(内存级,面板重开秒出) */
+  let epThumbToken = 0;
+  function epThumb(url) {
+    if (epThumbCache.has(url)) return Promise.resolve(epThumbCache.get(url));
+    if (epThumbCache.size > 150) epThumbCache.clear();
+    const u = DB.getConfig().proxyMode ? API.proxied(url) : url;
+    return new Promise(resolve => {
+      let done = false, hls = null;
+      const v = document.createElement('video');
+      v.muted = true; v.crossOrigin = 'anonymous'; v.preload = 'auto';
+      v.playsInline = true; v.setAttribute('playsinline', '');
+      v.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none';
+      const finish = r => {
+        if (done) return; done = true;
+        if (r) epThumbCache.set(url, r);
+        clearTimeout(timer);
+        try { if (hls) hls.destroy(); } catch (e) {}
+        v.onseeked = v.onerror = v.onloadedmetadata = null;
+        v.removeAttribute('src'); try { v.load(); } catch (e) {} v.remove();
+        resolve(r);
+      };
+      const timer = setTimeout(() => finish(null), 14000);
+      const capture = () => {
+        try {
+          if (!v.videoWidth) { finish(null); return; }
+          const c = document.createElement('canvas');
+          c.width = 320; c.height = Math.max(2, Math.round(320 * v.videoHeight / v.videoWidth));
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          finish(c.toDataURL('image/jpeg', 0.62));
+        } catch (e) { finish(null); }   /* 直链无CORS头时画布被污染 */
+      };
+      let seekDone = false, mdAt = 0;
+      v.onseeked = () => { seekDone = true; capture(); };
+      /* 弱源兜底:seek 3秒未完成就先抓当前帧(好过没有) */
+      v.ontimeupdate = () => { if (!seekDone && mdAt && Date.now() - mdAt > 3000 && v.videoWidth) capture(); };
+      v.onloadedmetadata = () => {
+        mdAt = Date.now();
+        const dur = v.duration;
+        const at = isFinite(dur) && dur > 0 ? Math.min(dur * 0.28, 300) : 90;
+        try { v.currentTime = at; } catch (e) { capture(); }
+      };
+      v.onerror = () => finish(null);
+      if (/\.m3u8/i.test(url) && window.Hls && Hls.isSupported()) {
+        hls = new Hls({ maxBufferLength: 6, capLevelToPlayerSize: true, enableWorker: false });
+        hls.on(Hls.Events.ERROR, (evt, data) => { if (data && data.fatal) finish(null); });
+        hls.loadSource(u); hls.attachMedia(v);
+      } else {
+        v.src = u;
+      }
+      document.body.appendChild(v);
+    });
+  }
+  /* 并发3的取帧队列;面板关闭即停止 */
+  function genWallThumbs(d, items) {
+    const token = ++epThumbToken;
+    const queue = items.filter(it => !epThumbCache.has(it.url));
+    let idx = 0;
+    const worker = async () => {
+      while (idx < queue.length) {
+        if (token !== epThumbToken || !document.body.contains(d)) return;
+        const it = queue[idx++];
+        const data = await epThumb(it.url);
+        if (document.body.contains(d) && it.img && it.ph) {
+          if (data) {
+            it.img.src = data; it.img.style.display = 'block'; it.ph.style.display = 'none';
+          } else {
+            it.ph.classList.remove('loading');
+          }
+        }
+      }
+    };
+    for (let i = 0; i < 3; i++) worker();
+  }
+  function escName(s) {
+    return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
   function renderEpsTab(d, body) {
+    d.classList.add('has-eps');
     const g0 = state.groups[state.groupIndex];
     d.querySelector('.d-head').textContent = (state.title || state.name || '') + (g0 && g0.eps[state.epIndex] ? ' · ' + g0.eps[state.epIndex].name : '');
+    const hist = DB.getHist(state.key);
+    const wallItems = [];
     state.groups.forEach((g, gi) => {
-      const gh = el(`<div class="d-group">${g.name}</div>`);
-      body.appendChild(gh);
-      const grid = el('<div class="ep-grid"></div>');
+      body.appendChild(el('<div class="d-group">' + escName(g.name) + ' · ' + g.eps.length + '集</div>'));
+      const wall = el('<div class="ep-wall"></div>');
       g.eps.forEach((ep, ei) => {
-        const b = el(`<button class="ep" data-f tabindex="-1">${ep.name}</button>`);
-        if (gi === state.groupIndex && ei === state.epIndex) b.classList.add('current');
-        b.onclick = () => { closePanels(); loadEpisode(gi, ei); };
-        grid.appendChild(b);
+        const isCur = gi === state.groupIndex && ei === state.epIndex;
+        const isWatched = !isCur && gi === 0 && hist && typeof hist.epIndex === 'number' && ei < hist.epIndex;
+        const card = el('<div class="ep-card' + (isCur ? ' current' : '') + (isWatched ? ' watched' : '') + '" data-f tabindex="-1" role="button" aria-label="' + escName(ep.name) + '"></div>');
+        const thumb = el('<div class="ep-thumb"></div>');
+        const ph = el('<div class="ep-ph' + (isCur ? '' : ' loading') + '">' + escName(ep.name) + '</div>');
+        const img = document.createElement('img');
+        img.alt = ep.name || '';
+        img.style.display = 'none';
+        thumb.appendChild(ph); thumb.appendChild(img);
+        card.appendChild(thumb);
+        card.appendChild(el('<div class="ep-tag">' + escName(ep.name) + '</div>'));
+        if (isCur) card.appendChild(el('<span class="ep-badge">正在播</span>'));
+        card.onclick = () => { epThumbToken++; closePanels(); loadEpisode(gi, ei); };
+        wall.appendChild(card);
+        wallItems.push({ url: ep.url, img, ph });
       });
-      body.appendChild(grid);
+      body.appendChild(wall);
     });
-    /* 片头片尾标记(标记后进度条上出现定位点并自动跳过) */
-    body.appendChild(el('<div class="d-group">片头片尾(自动跳过)</div>'));
+    /* 当前组取帧(并发3,逐个填充);失败落回片名占位 */
+    genWallThumbs(d, wallItems.filter(it => it.url && !/^(blob:|data:)/i.test(it.url)));
     const mark = DB.getMark(state.key) || {};
     const ig = el('<div class="ep-grid"></div>');
     const mI = el('<button class="ep" data-f tabindex="-1">' + (mark.intro ? '★ 片头 ' + fmt(mark.intro) : '标记当前位置为片头') + '</button>');
