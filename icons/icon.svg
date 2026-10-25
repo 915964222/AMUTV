@@ -3,23 +3,22 @@
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#17171d"/><stop offset=".55" stop-color="#0e0e11"/><stop offset="1" stop-color="#08080a"/>
     </linearGradient>
-    <linearGradient id="scr" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fce5ba"/><stop offset=".45" stop-color="#edbb6e"/><stop offset="1" stop-color="#c48a37"/>
-    </linearGradient>
-    <radialGradient id="glow" cx=".5" cy=".52" r=".55">
-      <stop offset="0" stop-color="#ffb300" stop-opacity=".34"/><stop offset=".6" stop-color="#ffb300" stop-opacity=".12"/><stop offset="1" stop-color="#ffb300" stop-opacity="0"/>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".6">
+      <stop offset="0" stop-color="#ffb300" stop-opacity=".3"/><stop offset=".6" stop-color="#ffb300" stop-opacity=".1"/><stop offset="1" stop-color="#ffb300" stop-opacity="0"/>
     </radialGradient>
   </defs>
+  <!-- 小电视:与应用顶栏 logo 同款造型 -->
   <rect width="512" height="512" rx="100" fill="url(#bg)"/>
   <rect width="512" height="512" rx="100" fill="url(#glow)"/>
-  <g stroke="#edb563" stroke-width="10" stroke-linecap="round">
-    <path d="M198 168 L243 74"/><path d="M314 168 L269 74"/>
+  <g transform="translate(48 35) scale(6.5)">
+    <line x1="32" y1="17" x2="22" y2="5" stroke="#f5f5f7" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="32" y1="17" x2="42" y2="5" stroke="#f5f5f7" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="22" cy="5" r="1.6" fill="#f5f5f7"/>
+    <circle cx="42" cy="5" r="1.6" fill="#f5f5f7"/>
+    <rect x="8" y="15" width="48" height="41" rx="11" fill="#f5f5f7"/>
+    <rect x="14" y="21" width="36" height="29" rx="7" fill="#0a0a0d"/>
+    <text x="32" y="42.5" font-size="15" font-weight="900" text-anchor="middle" fill="#f5f5f7" font-family="Arial, Helvetica, sans-serif">TV</text>
+    <rect x="17" y="56" width="6" height="4" rx="1.5" fill="#f5f5f7"/>
+    <rect x="41" y="56" width="6" height="4" rx="1.5" fill="#f5f5f7"/>
   </g>
-  <circle cx="198" cy="168" r="5" fill="#edb563"/><circle cx="314" cy="168" r="5" fill="#edb563"/>
-  <circle cx="243" cy="74" r="5" fill="#edb563"/><circle cx="269" cy="74" r="5" fill="#edb563"/>
-  <rect x="86" y="159" width="340" height="194" rx="22" fill="#0b0b0e" stroke="#ffffff" stroke-opacity=".07" stroke-width="1.5"/>
-  <rect x="106" y="169" width="300" height="174" rx="13" fill="url(#scr)"/>
-  <text x="256" y="256" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="86" font-weight="700" fill="#221405" text-anchor="middle" dominant-baseline="central">AMU</text>
-  <rect x="231" y="353" width="50" height="25" rx="6" fill="#26262c"/>
-  <rect x="186" y="378" width="140" height="20" rx="9" fill="#1c1c21" stroke="#ffffff" stroke-opacity=".06" stroke-width="1"/>
 </svg>
