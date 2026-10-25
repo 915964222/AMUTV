@@ -173,54 +173,50 @@ const Player = (() => {
           <div class="t-row"><span class="t-name"></span><span class="t-ep"></span></div>
           <div class="pl-badges"></div>
         </div>
-        <div class="pl-top-right">
-          <button class="pc-btn" data-act="dm" title="弹幕开关">${I.dm}</button>
-          <button class="pc-btn" data-act="rcqr" title="手机遥控">${I.qr}</button>
-          <button class="pc-btn" data-act="favors" title="收藏">${I.fav}</button>
+        <div class="pl-status">
+          <span class="st-badge" id="st-qual" style="display:none"></span>
+          <span class="st-badge" id="st-net" style="display:none"></span>
+          <span class="st-badge" id="st-clock">--:--</span>
         </div>
       </div>
       <div class="pl-center"></div>
       <div class="pl-bottom">
+        <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
         <div class="pl-time-row">
-          <span class="pl-time" id="pl-cur">00:00</span>
+          <span class="pl-timebox"><span class="pl-time" id="pl-cur">00:00</span><span class="pl-time sep">/</span><span class="pl-time" id="pl-dur">00:00</span></span>
           <div class="pl-track" data-act="track" tabindex="-1" data-f>
             <div class="rail"><div class="pl-buf"></div><div class="fill" style="width:0%"><div class="thumb"></div></div></div>
             <div class="pl-tip" style="display:none"></div>
           </div>
-          <span class="pl-time" id="pl-dur">00:00</span>
-        </div>
-        <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
-        <div class="pl-ctrls">
-          <div class="pc-left">
-            <button class="pc-btn" data-act="prev" title="上一集">${I.prev}</button>
-            <button class="pc-btn" data-act="rew" title="快退10秒">${I.rew}</button>
-            <button class="pc-btn pc-play" data-act="play" title="暂停/播放">${I.pause}</button>
-            <button class="pc-btn" data-act="ff" title="快进10秒">${I.ff}</button>
-            <button class="pc-btn" data-act="next" title="下一集">${I.next}</button>
-          </div>
-          <div class="pc-right">
-            <div class="vol" data-f tabindex="-1">
-              <button class="pc-btn vol-ic" data-act="mute" title="静音">${I.vol}</button>
-              <div class="vol-bar"><i></i></div>
-              <span class="vol-pct">100</span>
-            </div>
-            <button class="pc-btn" data-act="pset" title="设置">${I.more}</button>
-            <button class="pc-btn" data-act="fs" title="全屏">${I.fs}</button>
+          <div class="pr-quick">
+            <button class="pr-btn" data-act="atrack" data-f tabindex="-1" style="display:none">音轨</button>
+            <button class="pr-btn" data-act="sub" data-f tabindex="-1">字幕</button>
+            <button class="pr-btn" data-act="speed" data-f tabindex="-1">x1</button>
           </div>
         </div>
         <div class="pl-chips">
           <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="kb">E</span></button>
           <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="kb">S</span></button>
-          <button class="pill" data-act="sniff" data-f tabindex="-1">嗅探<span class="kb">V</span></button>
-          <button class="pill" data-act="sub" data-f tabindex="-1">字幕</button>
+          <button class="pill" data-act="dm" data-f tabindex="-1">弹幕:开</button>
+          <button class="pill" data-act="dec" data-f tabindex="-1">解码:硬解</button>
           <button class="pill" data-act="q" data-f tabindex="-1">画质</button>
-          <button class="pill" data-act="speed" data-f tabindex="-1">x1</button>
+          <button class="pill" data-act="pset" data-f tabindex="-1">更多<span class="kb">P</span></button>
         </div>
       </div>
     </div>`);
     document.body.appendChild(root);
     video = root.querySelector('video');
     iframe = null;
+
+    /* 轻量状态层:时钟15秒刷新 + 网络状态 */
+    if (clockTimer) clearInterval(clockTimer);
+    updateStatusLayer();
+    clockTimer = setInterval(updateStatusLayer, 15000);
+    if (!updateStatusLayer._netHooked && navigator.connection && navigator.connection.addEventListener) {
+      navigator.connection.addEventListener('change', updateStatusLayer);
+      updateStatusLayer._netHooked = true;
+    }
+    video.addEventListener('loadedmetadata', () => { updateQualBadge(); updateAtrackLabels(); });
 
     root.querySelector('.t-name').textContent = state.title || '';
 
@@ -242,6 +238,8 @@ const Player = (() => {
         else if (act === 'q') cycleQuality();
         else if (act === 'sub') cycleSubTrack(btn);
         else if (act === 'dm') toggleDmQuick(btn);
+        else if (act === 'dec') cycleDecode();
+        else if (act === 'atrack') cycleAtrack();
         else if (act === 'mute') { if (video) { video.muted = !video.muted; updateVolUI(); } }
         else if (act === 'pset') togglePset();
         else if (act === 'rcqr') { togglePset(); const rb = [...root.querySelectorAll('.pl-strip .ep')].find(x => x.textContent.includes('远程遥控')); if (rb) rb.click(); }
@@ -287,16 +285,6 @@ const Player = (() => {
       tip.textContent = label;
     });
     track.addEventListener('mouseleave', () => { if (tip) tip.style.display = 'none'; });
-    // 音量条:点击/拖动调节
-    const vb = root.querySelector('.vol-bar');
-    const setVol = e => {
-      if (!video) return;
-      const r = vb.getBoundingClientRect();
-      video.muted = false;
-      video.volume = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    };
-    vb.addEventListener('pointerdown', e => { vb.setPointerCapture(e.pointerId); setVol(e); });
-    vb.addEventListener('pointermove', e => { if (e.buttons) setVol(e); });
     video.addEventListener('volumechange', updateVolUI);
     video.addEventListener('loadedmetadata', () => { if (state) state._marksDone = false; updateBadges(); updateVolUI(); });
 
@@ -478,7 +466,9 @@ const Player = (() => {
           }
           showCenter(`<div class="pl-msg">HLS 加载失败(${data.details})</div>`);
         });
-        hls.on(Hls.Events.LEVEL_SWITCHED, () => updateBadges());
+        hls.on(Hls.Events.LEVEL_SWITCHED, () => { updateBadges(); updateQualBadge(); });
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAtrackLabels);
+        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, updateAtrackLabels);
       } else {
         video.src = url;
       }
@@ -602,29 +592,11 @@ const Player = (() => {
     const parts = [];
     const g = state.groups[state.groupIndex];
     if (g && g.name) parts.push('<span class="pb pb-src">' + esc(g.name) + '</span>');
-    /* 画质:多码率取当前档位,直连按扩展名 */
-    let q = '';
-    if (hls && hls.levels && hls.levels.length) {
-      const lv = hls.levels[hls.currentLevel] || hls.levels[hls.loadLevel];
-      if (lv) {
-        const h = lv.height || 0;
-        q = h >= 2160 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : Math.round(lv.bitrate / 1000) + 'k';
-        if (hls.autoLevelEnabled) q += '·自动';
-      }
-    } else if (isFinite(video.duration) && video.duration > 0) {
-      q = /m3u8/i.test(currentEpUrl()) ? 'HLS' : '直连';
-    }
-    if (q) parts.push('<span class="pb pb-q">' + esc(q) + '</span>');
-    /* 解码:内核 + 硬软解 */
-    const dec = state.decodeMode || DB.getConfig().decodeMode || 'hw';
-    let decTxt = '';
-    if (hls) decTxt = 'MSE·' + (dec === 'sw' ? '软解' : '硬解');
-    else if (/m3u8/i.test(currentEpUrl())) decTxt = 'HLS·原生';
-    else decTxt = 'MP4·' + (dec === 'sw' ? '软解' : '硬解');
-    parts.push('<span class="pb pb-dec">' + esc(decTxt) + '</span>');
     if (state._resumeAt) parts.push('<span class="pb pb-resume">续播 ' + esc(state._resumeAt) + '</span>');
     box.innerHTML = parts.join('');
     updateQBtn();
+    updateQualBadge();
+    updateDecLabels();
   }
   /* 画质快捷键:多码率循环锁档,否则进设置面板 */
   function cycleQuality() {
@@ -647,9 +619,9 @@ const Player = (() => {
     if (!b) return;
     if (hls && hls.levels && hls.levels.length > 1 && !hls.autoLevelEnabled) {
       const lv = hls.levels[hls.currentLevel];
-      b.textContent = lv && lv.height ? (lv.height >= 2160 ? '4K' : lv.height + 'P') : '画质';
+      b.textContent = '画质:' + (lv && lv.height ? (lv.height >= 2160 ? '4K' : lv.height + 'P') : '直连');
     } else if (hls && hls.levels && hls.levels.length > 1) {
-      b.textContent = '自动';
+      b.textContent = '画质:自动';
     } else {
       b.textContent = '画质';
     }
@@ -683,10 +655,78 @@ const Player = (() => {
   }
   /* ---------- 顶栏弹幕按钮状态 ---------- */
   function updateDmBtn() {
-    const b = root && root.querySelector('.pl-top [data-act="dm"]');
-    if (!b) return;
     ensureDanmaku();
-    b.classList.toggle('off', !(dm && dm.state.on));
+    const on = dm && dm.state.on;
+    root.querySelectorAll('.pl-chips [data-act="dm"]').forEach(b => b.textContent = '弹幕:' + (on ? '开' : '关'));
+  }
+  /* ---------- 轻量状态层:时钟/网络/画质徽章(纯展示,不接收点击) ---------- */
+  let clockTimer = 0;
+  function updateStatusLayer() {
+    if (!root || !root.isConnected) return;
+    const ck = root.querySelector('#st-clock');
+    if (ck) ck.textContent = new Date().toTimeString().slice(0, 5);
+    const nb = root.querySelector('#st-net');
+    if (nb) {
+      const c = navigator.connection || {};
+      const et = (c.effectiveType || '').toUpperCase();
+      const txt = c.type === 'wifi' ? ('Wi-Fi' + (et ? ' · ' + et : '')) : (c.type === 'cellular' && et ? et : (et && /^5G|4G$/.test(et) ? et : '')) || '';
+      nb.style.display = txt ? '' : 'none';
+      nb.textContent = txt;
+    }
+  }
+  function updateQualBadge() {
+    if (!root || !video) return;
+    const q = root.querySelector('#st-qual');
+    if (!q) return;
+    let txt = '';
+    if (hls && hls.levels && hls.levels.length) {
+      const lv = hls.levels[hls.currentLevel] || hls.levels[hls.loadLevel];
+      if (lv) {
+        const h = lv.height || 0;
+        txt = h >= 2160 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : Math.round(lv.bitrate / 1000) + 'K';
+        const fr = Number(lv.frameRate || (lv.attrs && lv.attrs['FRAME-RATE']) || 0);
+        if (fr >= 50) txt += '/' + Math.round(fr);
+        if (hls.autoLevelEnabled) txt += '·自动';
+      }
+    } else if (video.videoHeight) {
+      txt = video.videoHeight >= 2160 ? '4K' : video.videoHeight + 'P';
+    }
+    q.textContent = txt;
+    q.style.display = txt ? '' : 'none';
+  }
+  /* ---------- 音轨/解码 循环(深度配置层快捷) ---------- */
+  function updateAtrackLabels() {
+    if (!root) return;
+    const has = hls && hls.audioTracks && hls.audioTracks.length > 1;
+    root.querySelectorAll('[data-act="atrack"]').forEach(b => {
+      b.style.display = has ? '' : 'none';
+      if (has) {
+        const t = hls.audioTracks[hls.audioTrack] || {};
+        b.textContent = '音轨:' + (t.name || t.lang || '音轨' + (hls.audioTrack + 1));
+      }
+    });
+  }
+  function cycleAtrack() {
+    if (!hls || !hls.audioTracks || hls.audioTracks.length < 2) { if (window.toast) toast('当前流无可切换音轨'); return; }
+    hls.audioTrack = (hls.audioTrack + 1) % hls.audioTracks.length;
+    updateAtrackLabels();
+    const t = hls.audioTracks[hls.audioTrack] || {};
+    if (window.toast) toast('音轨:' + (t.name || t.lang || '音轨' + (hls.audioTrack + 1)));
+  }
+  function updateDecLabels() {
+    if (!root) return;
+    const dec = state.decodeMode || DB.getConfig().decodeMode || 'hw';
+    root.querySelectorAll('[data-act="dec"]').forEach(b => b.textContent = '解码:' + (dec === 'hw' ? '硬解' : '软解'));
+  }
+  function cycleDecode() {
+    const cur = state.decodeMode || DB.getConfig().decodeMode || 'hw';
+    const next = cur === 'hw' ? 'sw' : 'hw';
+    state.decodeMode = next;
+    DB.setConfig({ decodeMode: next });
+    updateDecLabels();
+    if (window.toast) toast(next === 'hw' ? '已切换硬件解码' : '已切换软解兼容模式');
+    closePanels();
+    loadEpisode(state.groupIndex, state.epIndex);
   }
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
   function cycleSpeed(btn) {
@@ -694,7 +734,7 @@ const Player = (() => {
     const cur = SPEEDS.indexOf(video.playbackRate) === -1 ? 0 : SPEEDS.indexOf(video.playbackRate);
     const next = SPEEDS[(cur + 1) % SPEEDS.length];
     video.playbackRate = next;
-    btn.textContent = 'x' + next;
+    root.querySelectorAll('[data-act="speed"]').forEach(b => b.textContent = b.classList.contains('pr-btn') ? 'x' + next : '倍速:' + next + 'x');
   }
   function toggleFs() {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -802,8 +842,9 @@ const Player = (() => {
     list.forEach(function (t, i) { if (t.track.mode === 'showing') cur = i; });
     const next = cur + 1 >= list.length ? -1 : cur + 1;
     list.forEach(function (t, i) { t.track.mode = (i === next ? 'showing' : 'hidden'); });
-    const label = next < 0 ? '字幕' : '字幕·' + list[next].name;
-    if (btn) btn.textContent = label;
+    root.querySelectorAll('[data-act="sub"]').forEach(function (b) {
+      b.textContent = b.classList.contains('pr-btn') ? (next < 0 ? '字幕' : '字幕·' + list[next].name) : ('字幕:' + (next < 0 ? '关' : list[next].name));
+    });
     if (window.toast) toast(next < 0 ? '字幕已关闭' : '字幕:' + list[next].name);
   }
   /* 快捷弹幕开关 */
@@ -812,7 +853,7 @@ const Player = (() => {
     if (!dm || !window.Danmaku) { if (window.toast) toast('弹幕组件未加载'); return; }
     dm.setOn(!dm.state.on);
     saveDm();
-    if (btn && btn.classList.contains('fn')) btn.textContent = dm.state.on ? '弹幕·开' : '弹幕·关';
+    root.querySelectorAll('.pl-chips [data-act="dm"]').forEach(b => b.textContent = '弹幕:' + (dm.state.on ? '开' : '关'));
     updateDmBtn();
     if (window.toast) toast(dm.state.on ? '弹幕已开' : '弹幕已关');
   }
@@ -833,6 +874,9 @@ const Player = (() => {
       const qPrev = el('<button class="ep" data-f tabindex="-1">⏮ 上一集</button>');
       qPrev.onclick = () => { closePanels(); switchEp(-1); };
       quick.appendChild(qPrev);
+      const qFav = el('<button class="ep" data-f tabindex="-1">♡ 收藏 / 取消收藏</button>');
+      qFav.onclick = () => toggleFavBtn(qFav);
+      quick.appendChild(qFav);
       const qRc = el('<button class="ep" data-f tabindex="-1">📱 远程遥控</button>');
       qRc.onclick = () => {
         body.innerHTML = '';
@@ -1638,6 +1682,7 @@ const Player = (() => {
 
   /* ---------- 退出 ---------- */
   function exit() {
+    if (clockTimer) clearInterval(clockTimer);
     saveProgress();
     destroyEngine();
     rcStop();

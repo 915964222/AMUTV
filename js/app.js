@@ -826,8 +826,33 @@ const App = (() => {
       lvPlayInline(lvCur.ch, lvCur.group, next);
     } else {
       if (window.toast) toast((reason || '线路') + ':所有线路均无响应');
+      lvShowFail(lvCur.ch, lvCur.group);
       lvStop();   // 防止后续致命错误重复提示
     }
+  }
+
+  /* 频道全部线路失效:屏幕内明确提示(免费源时常失效),提供重试/换台 */
+  function lvShowFail(ch, group) {
+    const screen = view().querySelector('#lv-screen');
+    if (!screen) return;
+    screen.querySelectorAll('.lv-fail').forEach(x => x.remove());
+    const fail = UI.el(`<div class="lv-fail">
+      <div class="f-t">:( 该频道所有线路均无响应</div>
+      <div class="f-h">免费直播源时常失效,可换其他频道、切换顶部直播源(推荐「IPTV·全球台」)或稍后重试</div>
+      <div class="f-btns">
+        <button class="btn" data-op="retry">↻ 重试</button>
+        <button class="btn" data-op="next">⏭ 下一个频道</button>
+      </div>
+    </div>`);
+    fail.querySelector('[data-op="retry"]').onclick = () => { fail.remove(); lvPlayInline(ch, group, 0); };
+    fail.querySelector('[data-op="next"]').onclick = () => {
+      fail.remove();
+      const chans = group.channels;
+      const i = chans.indexOf(ch);
+      const nxt = chans[i + 1] || chans[0];
+      if (nxt) lvPlayInline(nxt, group, 0);
+    };
+    screen.appendChild(fail);
   }
 
   function lvArmWatchdog() {
