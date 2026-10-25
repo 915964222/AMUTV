@@ -656,3 +656,33 @@ button, [data-f] { outline: none; }
 /* 跳过片头&横排面板对齐悬浮岛 */
 .skip-intro { position: absolute; right: 26px; bottom: 150px; margin: 0; z-index: 6; }
 .pl-strip { bottom: 150px; left: 26px; right: 26px; }
+
+/* ============ 播放器·按参考图定稿层(Apple TV+ 悬浮控制条) ============ */
+/* 控制行:全部居中单行,选集移到最左,主播放键居中放大 */
+.pl-ctrls { justify-content: center; gap: 14px; }
+.pl-ctrls .pc-right { position: static; display: contents; }
+.pl-ctrls .pc-right .pc-btn { order: 5; }
+.pl-ctrls .pc-right .pc-wide { order: -1; }
+.pl-ctrls .pc-left { display: contents; }
+.pl-ctrls .pc-left .pc-btn { order: 1; }
+.pl-ctrls .pc-left .pc-play { order: 2; }
+.pl-ctrls .pc-btn { width: 46px; height: 46px; background: transparent; }
+.pl-ctrls .pc-btn:hover { background: rgba(255, 255, 255, .14); }
+.pl-ctrls .pc-play { width: 68px; height: 68px; background: #fff; margin: 0 6px; }
+.pl-ctrls .pc-play svg { width: 30px; height: 30px; }
+.pl-ctrls .pc-wide { height: 46px; padding: 0 20px; background: transparent; border: 1px solid rgba(255,255,255,.18); }
+.pl-ctrls .pc-wide:hover { background: rgba(255, 255, 255, .14); }
+/* 悬浮岛:更宽更扁,圆角 20 */
+.pl-bottom { left: 22px; right: 22px; bottom: 20px; border-radius: 20px; padding: 14px 18px 12px; }
+/* 进度条:细白,小把手(参考样式) */
+.pl-track .rail { height: 4px; border-radius: 2px; }
+.pl-track:hover .rail, .pl-track:focus .rail { height: 6px; }
+.pl-track .fill .thumb { width: 13px; height: 13px; box-shadow: 0 1px 8px rgba(0,0,0,.6); }
+.pl-time { font-size: 13px; font-weight: 500; opacity: .85; }
+/* 标题:大标题+灰色集数副标(去徽标块) */
+.pl-title { gap: 12px; }
+.pl-title .t-name { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
+.pl-title .t-ep {
+  background: transparent; border-radius: 0; padding: 0;
+  font-size: 13.5px; font-weight: 500; color: rgba(255, 255, 255, .55); letter-spacing: .5px;
+}
