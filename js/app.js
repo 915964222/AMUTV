@@ -880,7 +880,7 @@ const App = (() => {
       /* 同名合并:跨源同名片 → 代表项(画质最高) + 源数 + 最快源 */
       const byName = new Map();
       groups.filter(g => !g.error).forEach(g => {
-        g.list.forEach(it => {
+        (g.list || []).forEach(it => {
           if (!it || !it.name) return;
           const m = byName.get(it.name) || { it, count: 0, bestMs: g.ms, srcName: g.srcName, frm: typeName(it), q: 0 };
           m.count++;
@@ -888,6 +888,7 @@ const App = (() => {
           if (q > m.q) { m.q = q; m.it = it; }
           if (g.ms < m.bestMs) { m.bestMs = g.ms; m.srcName = g.srcName; }
           if (!m.frm || m.frm === '其他') m.frm = typeName(it);
+          byName.set(it.name, m);
         });
       });
       let merged = [...byName.values()];
@@ -1385,6 +1386,24 @@ const App = (() => {
   }
 
   /* ============ 设置页 ============ */
+  /* 设置页分区图标(单色线性 SVG) */
+  const SIC = (p) => '<svg class="sic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
+  const I_SET = {
+    tv: SIC('<rect x="3" y="6.5" width="18" height="12.5" rx="2"/><path d="M8 2.5l4 4 4-4"/>'),
+    tune: SIC('<path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h13"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="19" cy="17" r="2"/>'),
+    repo: SIC('<rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v9.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4"/>'),
+    cloud: SIC('<path d="M7 18.5a4.2 4.2 0 0 1-.5-8.4A5.6 5.6 0 0 1 17.4 8.7 4.3 4.3 0 0 1 16.8 17.5z"/>'),
+    cloud4k: SIC('<path d="M7 18.5a4.2 4.2 0 0 1-.5-8.4A5.6 5.6 0 0 1 17.4 8.7 4.3 4.3 0 0 1 16.8 17.5z"/><path d="M11 11.5l4 2.2-4 2.2z"/>'),
+    dm: SIC('<path d="M4 5.5h16v10.5H9.5L4.5 20z"/><path d="M8 9.5h8M8 12.5h5"/>'),
+    chip: SIC('<rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 2.5v4M14.5 2.5v4M9.5 17.5v4M14.5 17.5v4M2.5 9.5h4M2.5 14.5h4M17.5 9.5h4M17.5 14.5h4"/>'),
+    db: SIC('<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5V18.5c0 1.66 3.58 3 8 3s8-1.34 8-3V5.5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>'),
+    info: SIC('<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11.5V16"/>'),
+    phone: SIC('<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18h2"/>'),
+    dl: SIC('<path d="M12 4v11M7.5 11.5L12 16l4.5-4.5M4 19.5h16"/>'),
+    ul: SIC('<path d="M12 16V5M7.5 9.5L12 5l4.5 4.5M4 19.5h16"/>'),
+    trash: SIC('<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>'),
+  };
+
   function pageSet() {
     const cfg = DB.getConfig();
     const srcs = DB.getSources();
@@ -1392,10 +1411,10 @@ const App = (() => {
     const drives = DB.getDrives();
     const cur = DB.getCurrentSource();
     view().innerHTML = `
-      <div class="page-title">设置</div>
-      <div class="settings">
-        <div class="section">
-          <h3>数据源</h3>
+      <div class="page-title">设置 <span class="sub">数据源 · 播放 · 网盘 · 备份</span></div>
+      <div class="settings set-grid">
+        <section class="sec-card span-2">
+          <div class="sec-head"><span class="sec-ico">${I_SET.tv}</span>数据源管理<span class="sec-tag">${srcs.length} 个源 · ${repos.length} 个仓库</span></div>
           <div class="src-list" id="src-list"></div>
           <div class="form">
             <input id="src-name" data-f tabindex="-1" placeholder="名称(如:我的采集源)">
@@ -1403,9 +1422,22 @@ const App = (() => {
             <button class="btn primary" id="src-add" data-f tabindex="-1">添加源</button>
           </div>
           <div class="hint">支持苹果CMS V10 采集接口(参数 ac=detail / videolist 均可自动兼容)。</div>
-        </div>
-        <div class="section">
-          <h3>仓库订阅(单仓 / 多仓)</h3>
+        </section>
+        <section class="sec-card span-2">
+          <div class="sec-head"><span class="sec-ico">${I_SET.tune}</span>播放与搜索</div>
+          <div class="set-rows">
+            <div class="set-row"><div class="set-txt"><b>自动换源</b><span>播放失败时自动尝试其他源同名影片,最多3次</span></div><input type="checkbox" class="sw" id="cfg-autoswitch" data-f tabindex="-1" ${cfg.autoSwitch ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>代理模式</b><span>经本地服务器转发,解决跨域/防盗链</span></div><input type="checkbox" class="sw" id="cfg-proxy" data-f tabindex="-1" ${cfg.proxyMode ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>全网搜索并发数</b><span>同时请求的源数量(1-12)</span></div><input type="number" id="cfg-pool" data-f tabindex="-1" min="1" max="12" value="${cfg.multiSearch}"></div>
+            <div class="set-row"><div class="set-txt"><b>自动跳过片头</b><span>播放时默认跳过;按影片精确标记在播放器⚙里</span></div><input type="checkbox" class="sw" id="cfg-skipintro" data-f tabindex="-1" ${cfg.skipIntroAuto ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>默认片头时长</b><span>秒(0-600)</span></div><input type="number" id="cfg-intro" data-f tabindex="-1" min="0" max="600" value="${cfg.defaultIntroSec}"></div>
+            <div class="set-row"><div class="set-txt"><b>M3U8 广告过滤</b><span>自动剔除贴片/插入广告切片</span></div><input type="checkbox" class="sw" id="cfg-adfilter" data-f tabindex="-1" ${cfg.adFilter !== false ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>智能嗅探直连</b><span>捕获网页直链后自动择优播放</span></div><input type="checkbox" class="sw" id="cfg-sniffauto" data-f tabindex="-1" ${cfg.sniffAuto !== false ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>网盘海报墙刮削</b><span>豆瓣:评分/海报/简介/演员表</span></div><input type="checkbox" class="sw" id="cfg-scrape" data-f tabindex="-1" ${cfg.scrapeOn !== false ? 'checked' : ''}></div>
+          </div>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.repo}</span>仓库订阅<span class="sec-tag">单仓 / 多仓</span></div>
           <div class="src-list" id="repo-list"></div>
           <div class="form">
             <input id="repo-name" data-f tabindex="-1" placeholder="备注名(可空)">
@@ -1416,34 +1448,17 @@ const App = (() => {
             <textarea id="repo-text" data-f tabindex="-1" placeholder="…或直接粘贴 TVBox 配置 JSON 文本(支持单仓 sites / 多仓 urls / storeHouse)"></textarea>
             <button class="btn" id="repo-parse" data-f tabindex="-1">解析粘贴内容</button>
           </div>
-          <button class="btn" id="cfg-push-btn" data-f tabindex="-1" style="margin-top:8px">📱 手机扫码推送配置</button>
+          <button class="btn" id="cfg-push-btn" data-f tabindex="-1" style="margin-top:8px">${I_SET.phone} 手机扫码推送配置</button>
           <div class="hint">自动解析配置中的苹果CMS影视站(type 0/1)并加入数据源;爬虫类源(csp_)网页版暂不支持。解析会保留上次结果,删除仓库会一并移除其源。</div>
-        </div>
-        <div class="section">
-          <h3>弹幕接口配置</h3>
-          <div class="form">
-            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName} 占位,返回B站XML或dandanplay JSON;留空=用官方)">
-            <input id="dm-appid" data-f tabindex="-1" placeholder="弹弹play AppId(官方接口需要,dev.dandanplay.com 申请)" style="flex:1 1 45%">
-            <input id="dm-secret" data-f tabindex="-1" type="password" placeholder="弹弹play AppSecret" style="flex:1 1 45%">
-            <button class="btn primary" id="dm-save" data-f tabindex="-1">保存弹幕配置</button>
-          </div>
-          <div class="hint">默认接口:弹弹play 官方(2025 起匿名访问已关闭,需在此填入自己申请的 AppId/AppSecret)。
-          自定义接口:填一个含 <b>{fileName}</b> 占位的 URL,播放器点「在线弹幕」时会用当前文件名请求;返回 B站弹幕 XML 或 dandanplay comment JSON 均可自动识别。</div>
-        </div>
-        <div class="section">
-          <h3>云盘 4K 播放(阿里云盘扫码 / 夸克网盘)</h3>
-          <div id="cloud-acct-list" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
-          <div id="cloud-login"></div>
-          <div class="hint">登录后在「网盘」页选择对应云盘即可浏览/播放,4K 与蓝光 Remux 原画直连(直链经本机中转,支持拖动)。</div>
-        </div>
-        <div class="section">
-          <h3>网盘挂载(WebDAV / Alist)</h3>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.cloud}</span>网盘挂载<span class="sec-tag">WebDAV / Alist / SMB</span></div>
           <div class="src-list" id="drive-list"></div>
           <div class="form">
-            <select id="drv-type" data-f tabindex="-1" style="background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:12px;font-size:15px">
+            <select id="drv-type" data-f tabindex="-1">
               <option value="alist">Alist(推荐:聚合阿里云盘/夸克/百度/115)</option>
               <option value="webdav">WebDAV(坚果云等)</option>
-              <option value="smb">SMB / Windows共享(电脑端可用,填 \NAS\share)</option>
+              <option value="smb">SMB / Windows共享(电脑端可用,填 \\NAS\\share)</option>
             </select>
             <input id="drv-name" data-f tabindex="-1" placeholder="名称">
           </div>
@@ -1454,56 +1469,46 @@ const App = (() => {
             <input id="drv-pass" data-f tabindex="-1" type="password" placeholder="密码(WebDAV)" style="flex:0 0 150px">
             <button class="btn primary" id="drv-add" data-f tabindex="-1">挂载</button>
           </div>
-          <div class="hint">SMB:电脑端填 \NAS\share 形式的共享路径(账号密码留空则用 Windows 当前登录身份;NFS 无法直连,请在 NAS 上同时开启 SMB/WebDAV)。
-          蓝光原盘:进入 BDMV/STREAM 目录,按大小选择最大的 .m2ts 正片(应用自动包装为可播列表)。
-          Alist 需自建(本机 docker 即可),在其中填入阿里云盘/夸克/百度网盘/115 的账号 Token 后,
-          把 Alist 地址+Token 填到这里即可原画直连播放(302 重定向到网盘原始直链,不经转码中转)。
+          <div class="hint">SMB:电脑端填 \NAS\share 形式共享路径(账号密码留空用 Windows 当前身份;NFS 请在 NAS 上开 SMB/WebDAV)。
+          蓝光原盘:进入 BDMV/STREAM 目录选最大 .m2ts 正片。Alist 需自建,填地址+Token 后 302 原画直连。
           内置演示:地址 http://localhost:9978 选 Alist 类型(Token 随意),或 http://localhost:9978/dav/ 选 WebDAV。</div>
-        </div>
-        <div class="section">
-          <h3>播放 / 搜索</h3>
-          <div class="form" style="align-items:center;flex-direction:column;gap:12px">
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-autoswitch" data-f tabindex="-1" ${cfg.autoSwitch ? 'checked' : ''} style="width:18px;height:18px">
-              自动换源(播放失败时自动尝试其他源的同名影片,最多3次)
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-proxy" data-f tabindex="-1" ${cfg.proxyMode ? 'checked' : ''} style="width:18px;height:18px">
-              代理模式(通过本地服务器转发,解决跨域/防盗链)
-            </label>
-            <label style="display:flex;gap:8px;align-items:center">
-              全网搜索并发数 <input type="number" id="cfg-pool" data-f tabindex="-1" min="1" max="12" value="${cfg.multiSearch}" style="width:70px">
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-skipintro" data-f tabindex="-1" ${cfg.skipIntroAuto ? 'checked' : ''} style="width:18px;height:18px">
-              自动跳过片头(播放时默认)
-            </label>
-            <label style="display:flex;gap:8px;align-items:center">
-              默认片头时长(秒) <input type="number" id="cfg-intro" data-f tabindex="-1" min="0" max="600" value="${cfg.defaultIntroSec}" style="width:80px">
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-adfilter" data-f tabindex="-1" ${cfg.adFilter !== false ? 'checked' : ''} style="width:18px;height:18px">
-              M3U8 广告切片过滤(自动剔除贴片/插入广告)
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-sniffauto" data-f tabindex="-1" ${cfg.sniffAuto !== false ? 'checked' : ''} style="width:18px;height:18px">
-              智能嗅探自动直连(捕获直链后自动播放)
-            </label>
-            <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="cfg-scrape" data-f tabindex="-1" ${cfg.scrapeOn !== false ? 'checked' : ''} style="width:18px;height:18px">
-              网盘海报墙刮削(豆瓣:评分/海报/简介/演员表)
-            </label>
-            <div class="hint" style="margin-top:4px">按影片精确的片头/片尾:播放页「⚙ 设置 → 片头片尾」里标记,会按影片记忆。</div>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.cloud4k}</span>云盘 4K 播放<span class="sec-tag">阿里云盘扫码 / 夸克</span></div>
+          <div id="cloud-acct-list" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+          <div id="cloud-login"></div>
+          <div class="hint">登录后在「网盘」页选择对应云盘即可浏览/播放,4K 与蓝光 Remux 原画直连(直链经本机中转,支持拖动)。</div>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.dm}</span>弹幕接口<span class="sec-tag">弹弹play / 自建</span></div>
+          <div class="form">
+            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName} 占位,返回B站XML或dandanplay JSON;留空=用官方)">
+            <input id="dm-appid" data-f tabindex="-1" placeholder="弹弹play AppId(官方接口需要,dev.dandanplay.com 申请)" style="flex:1 1 45%">
+            <input id="dm-secret" data-f tabindex="-1" type="password" placeholder="弹弹play AppSecret" style="flex:1 1 45%">
+            <button class="btn primary" id="dm-save" data-f tabindex="-1">保存弹幕配置</button>
           </div>
-        </div>
-        <div class="section">
-          <h3>设备解码能力(如实检测)</h3>
+          <div class="hint">默认接口:弹弹play 官方(2025 起匿名访问已关闭,需填入自己申请的 AppId/AppSecret)。
+          自定义接口:填一个含 <b>{fileName}</b> 占位的 URL,播放器点「在线弹幕」时用当前文件名请求;返回 B站弹幕 XML 或 dandanplay JSON 均可自动识别。</div>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.chip}</span>设备解码能力<span class="sec-tag">如实检测</span></div>
           <div class="cap-grid" id="cap-grid">检测中…</div>
           <div class="hint">以上为浏览器/WebView 实际支持的解码能力(绿=流畅硬解,白=可解,灰=不支持)。
-          杜比视界/HDR10+ 的 HDR 显示效果还需屏幕支持;音频源码透传(TrueHD/Atmos/DTS-HD)浏览器架构不支持,需 MPV 等原生播放器。</div>
-        </div>
-        <div class="section">
-          <h3>关于</h3>
+          杜比视界/HDR10+ 的 HDR 显示还需屏幕支持;音频源码透传(TrueHD/Atmos/DTS-HD)浏览器架构不支持,需 MPV 等原生播放器。</div>
+        </section>
+        <section class="sec-card">
+          <div class="sec-head"><span class="sec-ico">${I_SET.db}</span>数据与备份</div>
+          <div class="bk-btns">
+            <button class="btn" id="bk-export" data-f tabindex="-1">${I_SET.dl} 导出全部配置</button>
+            <button class="btn" id="bk-import-btn" data-f tabindex="-1">${I_SET.ul} 导入配置备份</button>
+            <input type="file" id="bk-import" accept=".json,application/json" style="display:none">
+            <button class="btn" id="bk-clear-cache" data-f tabindex="-1">${I_SET.trash} 清除缓存(刮削/EPG)</button>
+            <button class="btn" id="bk-reset" data-f tabindex="-1">${I_SET.trash} 恢复默认设置</button>
+          </div>
+          <div class="hint">导出包含:数据源/仓库/网盘/收藏/历史/播放标记/弹幕/直播源/全部设置。导入后自动生效并刷新页面。恢复默认设置只重置开关与数值,不删除数据源与历史。</div>
+        </section>
+        <section class="sec-card span-2">
+          <div class="sec-head"><span class="sec-ico">${I_SET.info}</span>关于</div>
           <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:10px">
             <img src="icons/favicon.jpg" alt="AMUTV" style="width:76px;height:76px;border-radius:16px;flex:none" onerror="this.onerror=null;this.src=location.protocol==='file:'?'file:///android_asset/www_icons_favicon.jpg':'icons/favicon.jpg';this.onerror=function(){this.style.display='none'}">
             <div class="hint" style="margin-top:0">
@@ -1511,8 +1516,8 @@ const App = (() => {
             本软件只提供聚合展示功能,所有资源均来自互联网公开内容,软件不参与任何资源的制作、上传、储存与下载等内容。本软件仅供个人学习交流参考,请于安装后 24 小时内自行删除。
             </div>
           </div>
-        </div>
-      </div>`;
+        </section>
+      </div>`
 
     renderSrcList(srcs, cur);
     renderRepoList(repos);
@@ -1526,7 +1531,7 @@ const App = (() => {
     srcs.forEach(s => {
       const origin = s.originId ? DB.getRepos().find(r => r.id === s.originId) : null;
       const item = UI.el(`<div class="src-item${cur && cur.id === s.id ? ' active-src' : ''}">
-        <span class="src-status" data-role="status">${cur && cur.id === s.id ? '✅' : '▫️'}</span>
+        <span class="src-status${cur && cur.id === s.id ? ' on' : ''}" data-role="status"></span>
         <span class="s-name">${s.name}${origin ? ` <span style="color:var(--muted);font-size:11px">[仓:${origin.name}]</span>` : ''}<br><span class="s-api">${s.api || '(内置)'}</span><span class="test-result" data-role="test" style="font-size:11.5px"></span></span>
         <button class="mini-btn" data-op="test" data-f tabindex="-1">测试</button>
         <button class="mini-btn" data-op="use" data-f tabindex="-1">使用</button>
@@ -1540,10 +1545,10 @@ const App = (() => {
         const r = await API.testSource(s);
         if (r.ok) {
           st.innerHTML = `<br><span style="color:#35c07f">✔ 连通 ${r.ms}ms · 返回${r.count}条</span>`;
-          badge.textContent = '🟢';
+          badge.classList.add('ok'); badge.classList.remove('bad');
         } else {
           st.innerHTML = `<br><span style="color:var(--danger)">✖ ${r.error}</span>`;
-          badge.textContent = '🔴';
+          badge.classList.add('bad'); badge.classList.remove('ok');
         }
       };
       item.querySelector('[data-op="use"]').onclick = () => {
@@ -1568,9 +1573,9 @@ const App = (() => {
     if (!repos.length) { list.innerHTML = '<div class="hint">暂未订阅仓库</div>'; return; }
     repos.forEach(r => {
       const cnt = DB.getSources().filter(s => s.originId === r.id).length;
-      const warn = cnt === 0 ? `<br><span style="color:var(--danger);font-size:11.5px">⚠️ 未解析出CMS源(可能全是爬虫源,网页版不支持)</span>` : '';
+      const warn = cnt === 0 ? `<br><span style="color:var(--danger);font-size:11.5px">未解析出CMS源(可能全是爬虫源,网页版不支持)</span>` : '';
       const item = UI.el(`<div class="src-item">
-        <span>🗄️</span>
+        <span class="s-ico">${I_SET.repo}</span>
         <span class="s-name">${r.name}<br><span class="s-api">${r.url}</span>${warn}</span>
         <span style="color:var(--muted);font-size:12px">${cnt}源</span>
         <button class="mini-btn" data-op="refresh" data-f tabindex="-1">刷新</button>
@@ -1588,7 +1593,7 @@ const App = (() => {
     if (!drives.length) { list.innerHTML = '<div class="hint">暂未挂载网盘</div>'; return; }
     drives.forEach(d => {
       const item = UI.el(`<div class="src-item">
-        <span>☁️</span>
+        <span class="s-ico">${I_SET.cloud}</span>
         <span class="s-name">${d.name}<br><span class="s-api">${d.url}</span></span>
         <button class="mini-btn danger" data-op="del" data-f tabindex="-1">卸载</button>
       </div>`);
@@ -1793,6 +1798,64 @@ const App = (() => {
     if (window.Cloud) {
       renderCloudAccts();
       Cloud.loginUI(view().querySelector('#cloud-login'), () => { renderCloudAccts(); });
+    }
+
+    /* 数据与备份:导出/导入全部配置,清缓存,恢复默认设置 */
+    const BK_KEYS = ['tvw_config', 'tvw_sources', 'tvw_repos', 'tvw_current_source', 'tvw_drives',
+      'tvw_favs', 'tvw_history', 'tvw_marks', 'tvw_danmaku', 'tvw_live_playlists', 'tvw_live_current', 'tvw_search_hist'];
+    const bkExport = view().querySelector('#bk-export');
+    if (bkExport) bkExport.onclick = () => {
+      const dump = {};
+      BK_KEYS.forEach(k => { const v = localStorage.getItem(k); if (v) dump[k] = v; });
+      const blob = new Blob([JSON.stringify({ app: 'AMUTV', ver: 1, ts: Date.now(), data: dump }, null, 1)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'amutv-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+      toast('已导出配置备份');
+    };
+    const bkImportBtn = view().querySelector('#bk-import-btn');
+    const bkImport = view().querySelector('#bk-import');
+    if (bkImportBtn && bkImport) bkImportBtn.onclick = () => bkImport.click();
+    if (bkImport) bkImport.onchange = () => {
+      const f = bkImport.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(rd.result);
+          const dump = obj && obj.data ? obj.data : obj;
+          let n = 0;
+          Object.keys(dump).forEach(k => { if (k.indexOf('tvw_') === 0) { localStorage.setItem(k, typeof dump[k] === 'string' ? dump[k] : JSON.stringify(dump[k])); n++; } });
+          if (!n) { toastErr('备份文件里没有可导入的配置'); return; }
+          toast('已导入 ' + n + ' 项,正在刷新…');
+          setTimeout(() => location.reload(), 900);
+        } catch (e) { toastErr('备份文件解析失败:' + (e.message || e)); }
+      };
+      rd.readAsText(f);
+    };
+    const bkClear = view().querySelector('#bk-clear-cache');
+    if (bkClear) bkClear.onclick = () => {
+      let n = 0;
+      ['tvw_scrape', 'tvw_live_epg'].forEach(k => { if (localStorage.getItem(k)) { localStorage.removeItem(k); n++; } });
+      toast(n ? '已清除刮削与EPG缓存' : '缓存本来就是空的');
+    };
+    const bkReset = view().querySelector('#bk-reset');
+    if (bkReset) {
+      let armed = 0;
+      bkReset.onclick = () => {
+        if (Date.now() - armed > 3000) {
+          armed = Date.now();
+          bkReset.classList.add('danger');
+          bkReset.innerHTML = I_SET.trash + ' 再点一次确认重置';
+          setTimeout(() => { bkReset.classList.remove('danger'); bkReset.innerHTML = I_SET.trash + ' 恢复默认设置'; }, 3000);
+          return;
+        }
+        localStorage.removeItem('tvw_config');
+        toast('已恢复默认设置');
+        pageSet();
+      };
     }
 
     // 设备解码能力检测(MediaCapabilities API,如实报告)
