@@ -1099,7 +1099,6 @@ const App = (() => {
             本软件只提供聚合展示功能,所有资源均来自互联网公开内容,软件不参与任何资源的制作、上传、储存与下载等内容。本软件仅供个人学习交流参考,请于安装后 24 小时内自行删除。
             </div>
           </div>
-          <img src="icons/about.jpg" alt="AMUTV" style="display:block;width:280px;max-width:100%;margin:8px auto 0;border-radius:12px" onerror="this.onerror=null;this.src=location.protocol==='file:'?'file:///android_asset/www_icons_about.jpg':'icons/about.jpg';this.onerror=function(){this.style.display='none'}">
         </div>
       </div>`;
 
