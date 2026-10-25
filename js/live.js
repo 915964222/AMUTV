@@ -84,11 +84,11 @@
       write(CK, _old.filter(function (x) { return x.url !== '/live-demo.txt'; }));
     }
   } catch (e) {}
-  function addPlaylist(name, url, text) {
+  function addPlaylist(name, url, text, urls) {
     const list = getPlaylists();
     if (url && list.some(function (x) { return x.url === url; })) return { ok: false, msg: '该直播源已存在' };
     const id = 'live_' + Date.now().toString(36);
-    list.push({ id: id, name: name || ('直播源' + (list.length + 1)), url: url || '', text: text || '' });
+    list.push({ id: id, name: name || ('直播源' + (list.length + 1)), url: url || '', text: text || '', urls: (urls && urls.length ? urls : undefined) });
     write(CK, list);
     return { ok: true, id: id };
   }
@@ -96,10 +96,19 @@
   function currentPl() { return read(CUR, null); }
   function setCurrentPl(id) { write(CUR, id); }
 
-  /* 预置直播源(已验证存活;jsdelivr 镜像在国内网络快且稳) */
+  /* 预置直播源:多镜像候选(按国内可达性排序,逐个自动回退) */
   const PRESETS = [
-    { name: '肥羊直播·央视卫视', url: 'https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u' },
-    { name: 'IPTV·全球台', url: 'https://iptv-org.github.io/iptv/index.m3u' },
+    { name: '肥羊直播·央视卫视', urls: [
+      'https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
+      'https://fastly.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
+      'https://gcore.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
+      'https://ghproxy.net/https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/index.m3u',
+    ]},
+    { name: 'IPTV·全球台', urls: [
+      'https://iptv-org.github.io/iptv/index.m3u',
+      'https://cdn.jsdelivr.net/gh/iptv-org/iptv@gh-pages/index.m3u',
+      'https://ghproxy.net/https://raw.githubusercontent.com/iptv-org/iptv/gh-pages/index.m3u',
+    ]},
   ];
 
   /* ---------- EPG(51zmt diyp 接口,当天节目单) ---------- */

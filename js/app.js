@@ -425,10 +425,10 @@ const App = (() => {
       Live.PRESETS.forEach(pr => {
         const b = UI.el(`<button class="cat" data-f tabindex="-1">${pr.name}</button>`);
         b.onclick = async () => {
-          toast('正在拉取直播源…');
+          toast('正在拉取直播源…(多镜像自动回退)');
           try {
-            const text = await liveFetchText(pr.url);
-            const r = Live.addPlaylist(pr.name, pr.url, text);
+            const text = await liveFetchText(pr.urls || [pr.url]);
+            const r = Live.addPlaylist(pr.name, (pr.urls || [pr.url])[0], text, pr.urls || [pr.url]);
             if (!r.ok) { toastErr(r.msg); return; }
             liveState.pl = r.id;
             Live.setCurrentPl(r.id);
@@ -443,10 +443,10 @@ const App = (() => {
       addAll.querySelector('button').onclick = async () => {
         if (window.toast) toast('正在添加推荐直播源…');
         for (const pr of Live.PRESETS) {
-          if (pr.url === '/live-demo.txt') continue;   // 演示源不自动加
+          if ((pr.urls || [pr.url])[0] === '/live-demo.txt') continue;   // 演示源不自动加
           try {
-            const text = await liveFetchText(pr.url);
-            Live.addPlaylist(pr.name, pr.url, text);
+            const text = await liveFetchText(pr.urls || [pr.url]);
+            Live.addPlaylist(pr.name, (pr.urls || [pr.url])[0], text, pr.urls || [pr.url]);
           } catch (e) { /* 单个失败继续 */ }
         }
         liveState.showImport = false;
@@ -476,7 +476,9 @@ const App = (() => {
     if (!plObj) { liveState.pl = null; pageLive(); return; }
     try {
       let text = plObj.text || '';
-      if ((!text || /^proxy error/i.test(text)) && plObj.url) text = await liveFetchText(plObj.url);
+      if ((!text || /^proxy error/i.test(text)) && plObj.url) {
+        text = await liveFetchText(plObj.urls && plObj.urls.length ? plObj.urls : plObj.url);
+      }
       const groups = Live.parsePlaylist(text);
       if (!groups.length) {
         throw new Error(/^#EXTM3U/i.test(text.trim())
@@ -495,8 +497,9 @@ const App = (() => {
     renderLiveUI(pls, plObj);
   }
 
-  /* 直播源拉取:校验内容有效;失败自动经 ghproxy 镜像重试 */
-  async function liveFetchText(url) {
+  /* 直播源拉取:多候选逐个回退;raw.githubusercontent 候选自动补 ghproxy 镜像;
+     网络错误/内容校验失败都继续下一个,最终错误信息带最后原因 */
+  async function liveFetchText(urlOrList) {
     const looksOk = t => t && t.length > 30 && !/^proxy error/i.test(t) &&
       (/#EXTM3U|#EXTINF|#genre#|^https?:\/\/\/?(\S+\s*,\s*https?:)|,/m.test(t));
     const tryFetch = async u => {
@@ -504,15 +507,25 @@ const App = (() => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     };
-    let text = '';
-    try { text = await tryFetch(url); } catch (e) { text = ''; }
-    if (looksOk(text)) return text;
-    if (/^https?:\/\/raw\.githubusercontent\.com/i.test(url)) {
-      const mirror = 'https://ghproxy.net/' + url;
-      try { text = await tryFetch(mirror); } catch (e) { text = text || ''; }
-      if (looksOk(text)) return text;
+    const cands = (Array.isArray(urlOrList) ? urlOrList : [urlOrList]).filter(Boolean);
+    const expanded = [];
+    cands.forEach(u => {
+      expanded.push(u);
+      if (/^https?:\/\/raw\.githubusercontent\.com/i.test(u) && expanded.indexOf('https://ghproxy.net/' + u) === -1) {
+        expanded.push('https://ghproxy.net/' + u);
+      }
+    });
+    let lastErr = '';
+    for (const u of expanded) {
+      try {
+        const text = await tryFetch(u);
+        if (looksOk(text)) return text;
+        lastErr = '内容无效(' + String(text).trim().slice(0, 36) + ')';
+      } catch (e) {
+        lastErr = (e && e.message) || '网络错误';
+      }
     }
-    throw new Error((text && /^proxy error/i.test(text)) ? '上游连接被重置' : '内容无效或拉取失败');
+    throw new Error('内容无效或拉取失败(' + lastErr + ')');
   }
 
   function bindLiveImport() {
@@ -845,11 +858,19 @@ const App = (() => {
     if (!epg) {
       Live.fetchEpg(ch.name).then(ep => { if (lvCur && lvCur.ch === ch || !lvCur) lvRenderEpgTimeline(ch, ep); }).catch(() => {
         if (tl) tl.innerHTML = '<div class="hint" style="padding:6px 2px">EPG 获取失败(51zmt 未收录该频道)</div>';
+        const epgEl0 = view().querySelector('#lv-osd-epg');
+        if (epgEl0) epgEl0.textContent = '暂无节目信息';
+        const bar0 = view().querySelector('#lv-osd .epg-bar'); if (bar0) bar0.style.display = 'none';
+        const t01 = view().querySelector('#lv-osd .epg-t'); if (t01) t01.style.display = 'none';
       });
       return;
     }
     if (!epg.items || !epg.items.length) {
       tl.innerHTML = '<div class="hint" style="padding:6px 2px">暂无节目信息(51zmt 未收录该频道)</div>';
+      const epgEl0 = view().querySelector('#lv-osd-epg');
+      if (epgEl0) epgEl0.textContent = '暂无节目信息';
+      const bar0 = view().querySelector('#lv-osd .epg-bar'); if (bar0) bar0.style.display = 'none';
+      const t01 = view().querySelector('#lv-osd .epg-t'); if (t01) t01.style.display = 'none';
       return;
     }
     const toMin = t => { const p = String(t).split(':'); return (+p[0]) * 60 + (+p[1]); };
@@ -1268,18 +1289,90 @@ const App = (() => {
   const driveState = { driveId: null, path: '/', fid: null };
   const VIDEO_EXT = /\.(mp4|mkv|webm|mov|m3u8|flv|avi|ts)(\?|$)/i;
 
+  /* ==== 文件行缩略图:隐藏video取帧(与播放器选集墙同思路;内存缓存,失败落回图标) ==== */
+  const rowThumbCache = new Map();
+  let rowThumbToken = 0;
+  function grabRowThumb(url) {
+    /* 缓存的是 Promise 本身:在途请求自动去重;失败则从缓存移除以便重试 */
+    if (rowThumbCache.has(url)) return rowThumbCache.get(url);
+    if (rowThumbCache.size > 200) rowThumbCache.clear();
+    const p = new Promise(resolve => {
+      let done = false, hls = null;
+      const v = document.createElement('video');
+      v.muted = true; v.crossOrigin = 'anonymous'; v.preload = 'auto';
+      v.playsInline = true; v.setAttribute('playsinline', '');
+      v.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none';
+      const finish = r => {
+        if (done) return; done = true;
+        if (!r) rowThumbCache.delete(url);
+        clearTimeout(timer);
+        try { if (hls) hls.destroy(); } catch (e) {}
+        v.onseeked = v.onerror = v.onloadedmetadata = v.ontimeupdate = null;
+        v.removeAttribute('src'); try { v.load(); } catch (e) {} v.remove();
+        resolve(r);
+      };
+      const timer = setTimeout(() => finish(null), 13000);
+      const capture = () => {
+        try {
+          if (!v.videoWidth) { finish(null); return; }
+          const c = document.createElement('canvas');
+          c.width = 240; c.height = Math.max(2, Math.round(240 * v.videoHeight / v.videoWidth));
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          finish(c.toDataURL('image/jpeg', 0.6));
+        } catch (e) { finish(null); }
+      };
+      let seekDone = false, mdAt = 0;
+      v.onseeked = () => { seekDone = true; capture(); };
+      v.ontimeupdate = () => { if (!seekDone && mdAt && Date.now() - mdAt > 3000 && v.videoWidth) capture(); };
+      v.onloadedmetadata = () => {
+        mdAt = Date.now();
+        const dur = v.duration;
+        const at = isFinite(dur) && dur > 0 ? Math.min(dur * 0.25, 240) : 60;
+        try { v.currentTime = at; } catch (e) { capture(); }
+      };
+      v.onerror = () => finish(null);
+      if (/\.m3u8/i.test(url) && window.Hls && Hls.isSupported()) {
+        hls = new Hls({ maxBufferLength: 6, capLevelToPlayerSize: true, enableWorker: false });
+        hls.on(Hls.Events.ERROR, (evt, data) => { if (data && data.fatal) finish(null); });
+        hls.loadSource(url); hls.attachMedia(v);
+      } else {
+        v.src = url;
+      }
+      document.body.appendChild(v);
+    });
+    rowThumbCache.set(url, p);
+    return p;
+  }
+  function genRowThumbs(box, items) {
+    const token = ++rowThumbToken;
+    const queue = items.filter(it => !rowThumbCache.has(it.url));
+    let idx = 0;
+    const worker = async () => {
+      while (idx < queue.length) {
+        if (token !== rowThumbToken || !document.body.contains(box)) return;
+        const it = queue[idx++];
+        const data = await grabRowThumb(it.url);
+        if (document.body.contains(box) && it.img) {
+          if (data) { it.img.src = data; it.img.style.display = 'block'; if (it.ph) it.ph.style.display = 'none'; }
+          else if (it.ph) it.ph.classList.remove('loading');
+        }
+      }
+    };
+    for (let i = 0; i < 2; i++) worker();
+  }
+
   function pageDrive() {
     const drives = DB.getDrives();
     view().innerHTML = `
-      <div class="page-title">网盘 <span class="sub">WebDAV / SMB(Alist 可聚合阿里云盘/夸克/百度/115)· 本地U盘即插即播</span></div>
-      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-        <button class="btn" id="local-pick" data-f tabindex="-1">本地 / U 盘播放</button>
+      <div class="page-title">网盘 <span class="sub">WebDAV / SMB / Alist / 云盘 · 本地U盘即插即播</span></div>
+      <div class="drv-cards" id="drv-cards"></div>
+      <div class="drv-toolbar">
         <div class="cat-row" style="padding:0;margin:0" id="wall-mode">
           <button class="cat${driveState.wall ? '' : ' active'}" data-mode="list" data-f tabindex="-1">列表</button>
           <button class="cat${driveState.wall ? ' active' : ''}" data-mode="wall" data-f tabindex="-1">海报墙(刮削)</button>
         </div>
-        <input type="file" id="local-file" accept="video/*,.m2ts,.ts,.mkv,.m3u8" style="display:none">
       </div>
+      <input type="file" id="local-file" accept="video/*,.m2ts,.ts,.mkv,.m3u8" style="display:none">
       <div id="drive-area"></div>`;
     const area = view().querySelector('#drive-area');
     view().querySelector('#wall-mode').addEventListener('click', e => {
@@ -1289,7 +1382,6 @@ const App = (() => {
       pageDrive();
     });
     // 本地/U盘:PC 走 objectURL;安卓 WebView 由 Java onShowFileChooser 接管并回调 __onLocalFile
-    view().querySelector('#local-pick').onclick = () => view().querySelector('#local-file').click();
     view().querySelector('#local-file').onchange = e => {
       const f = e.target.files[0];
       if (!f) return;
@@ -1301,22 +1393,25 @@ const App = (() => {
       });
       e.target.value = '';
     };
-    // 云盘账号(阿里扫码/夸克Cookie)也作为驱动出现
+    // 云盘账号(阿里扫码/夸克Cookie)也作为驱动出现;驱动以卡片呈现(本地U盘永远可用)
     const clouds = (window.Cloud ? Cloud.list() : []).map((c, i) => ({ id: 'cloud' + i, name: c.name + ' · 云盘', cloud: c }));
     const all = clouds.concat(drives);
+    if (!driveState.driveId || !all.find(d => d.id === driveState.driveId)) driveState.driveId = all.length ? all[0].id : null;
+    const cards = view().querySelector('#drv-cards');
+    const mkCard = (ico, name, type, active, onclick) => {
+      const c = UI.el('<div class="drv-card' + (active ? ' active' : '') + '" data-f tabindex="-1" role="button"><span class="dc-ico">' + ico + '</span><span class="dc-name">' + esc(name) + '</span><span class="dc-type">' + type + '</span></div>');
+      c.onclick = onclick;
+      cards.appendChild(c);
+    };
+    mkCard(I_SET.usb, '本地 / U盘', '即插即播', false, () => view().querySelector('#local-file').click());
+    all.forEach(d => {
+      const type = d.cloud ? '云盘账号' : ({ alist: 'Alist', webdav: 'WebDAV', smb: 'SMB 共享' }[d.type] || d.type);
+      mkCard(d.cloud ? I_SET.cloud4k : I_SET.hd, d.name, type, d.id === driveState.driveId, () => { driveState.driveId = d.id; driveState.path = '/'; driveState.fid = null; pageDrive(); });
+    });
     if (!all.length) {
       area.appendChild(UI.empty('还没有挂载网盘', '去设置里挂载', () => go('set')));
       return;
     }
-    // 选择器
-    if (!driveState.driveId || !all.find(d => d.id === driveState.driveId)) driveState.driveId = all[0].id;
-    const cr = UI.el('<div class="cat-row" id="drive-chips"></div>');
-    all.forEach(d => {
-      const b = UI.el(`<button class="cat${d.id === driveState.driveId ? ' active' : ''}" data-f tabindex="-1">${d.name}</button>`);
-      b.onclick = () => { driveState.driveId = d.id; driveState.path = '/'; driveState.fid = null; pageDrive(); };
-      cr.appendChild(b);
-    });
-    area.appendChild(cr);
     const browser = UI.el('<div id="dav-browser"></div>');
     area.appendChild(browser);
     const cur = all.find(d => d.id === driveState.driveId);
@@ -1345,7 +1440,7 @@ const App = (() => {
         const is4k = /2160|4k|uhd|remux/i.test(it.name) || it.size > 8e9;
         const sizeTxt = it.dir ? '文件夹' : fmtCloudSize(it.size);
         const row = UI.el(`<div class="list-row" data-f tabindex="-1">
-          <span style="font-size:26px">${it.dir ? '📁' : (isVideo ? '🎬' : '📄')}</span>
+          <span class="li-ico">${it.dir ? I_SET.folder : (isVideo ? I_SET.film : I_SET.file)}</span>
           <div class="li-main">
             <div class="li-name">${it.name}</div>
             <div class="li-sub">${sizeTxt}${isVideo && is4k ? ' · <b style="color:#7cc4ff">4K</b>' : ''}</div>
@@ -1472,7 +1567,7 @@ const App = (() => {
         b.onclick = () => { driveState.path = p; pageDrive(); };
         crumbs.appendChild(b);
       };
-      mk('🏠 根目录', '/');
+      mk('根目录', '/');
       parts.forEach((seg, i) => mk(seg, '/' + parts.slice(0, i + 1).join('/') + '/'));
       box.appendChild(crumbs);
 
@@ -1483,27 +1578,56 @@ const App = (() => {
         box.appendChild(UI.el('<div class="hint" style="margin-bottom:10px">💡 检测到蓝光原盘结构:进入 BDMV → STREAM,选择体积最大的 .m2ts 即为正片</div>'));
       }
       if (driveState.wall) { renderWall(drive, sub, items, box); return; }
+      /* 筛选chips + 统计行 */
+      const videos = items.filter(x => !x.dir && VIDEO_EXT.test(x.name));
+      const others = items.filter(x => !x.dir && !VIDEO_EXT.test(x.name));
+      const filter = browseDav._filter || 'all';
+      const bar = UI.el('<div class="drv-filter"></div>');
+      [['all', '全部 ' + items.length], ['video', '视频 ' + videos.length], ['other', '其他 ' + others.length]].forEach(pair => {
+        const b = UI.el('<button class="cat' + (filter === pair[0] ? ' active' : '') + '" data-f tabindex="-1">' + pair[1] + '</button>');
+        b.onclick = () => { browseDav._filter = pair[0]; pageDrive(); };
+        bar.appendChild(b);
+      });
+      box.appendChild(bar);
+      const totalSize = videos.reduce((s, x) => s + (x.size || 0), 0);
+      box.appendChild(UI.el('<div class="hint" style="margin:0 0 12px">' +
+        (totalSize > 1073741824 ? '视频共 ' + (totalSize / 1073741824).toFixed(1) + 'GB' : (totalSize ? '视频共 ' + (totalSize / 1048576).toFixed(0) + 'MB' : '')) + '</div>'));
+      const shown = items.filter(x => filter === 'all' || (filter === 'video' ? (!x.dir && VIDEO_EXT.test(x.name)) : (x.dir || !VIDEO_EXT.test(x.name))));
       const rows = UI.el('<div class="list-rows"></div>');
-      items.forEach(it => {
+      const thumbItems = [];
+      const THUMBABLE = /\.(mp4|mkv|webm|mov|avi|flv)(\?|$)/i;
+      shown.forEach(it => {
         const isVideo = !it.dir && VIDEO_EXT.test(it.name);
-        const sizeTxt = it.dir ? '文件夹' : ((it.size / 1024 / 1024).toFixed(1) + 'MB');
-        const row = UI.el(`<div class="list-row" data-f tabindex="-1">
-          <span style="font-size:26px">${it.dir ? '📁' : (isVideo ? '🎬' : '📄')}</span>
-          <div class="li-main">
-            <div class="li-name">${it.name}</div>
-            <div class="li-sub">${sizeTxt}</div>
-          </div>
-          ${isVideo ? '<div class="li-ops"><button class="mini-btn" data-op="play">▶ 播放</button></div>' : ''}
-        </div>`);
+        const is4k = isVideo && (/2160|4k|uhd|remux/i.test(it.name) || (it.size || 0) > 8e9);
+        const sizeTxt = it.dir ? '文件夹' : ((it.size / 1048576).toFixed(1) + 'MB');
+        const row = UI.el('<div class="list-row" data-f tabindex="-1">' +
+          (isVideo
+            ? '<div class="li-thumb"><div class="li-ph loading">' + I_SET.film + '</div><img alt="" style="display:none"></div>'
+            : '<span class="li-ico">' + (it.dir ? I_SET.folder : I_SET.file) + '</span>') +
+          '<div class="li-main">' +
+          '<div class="li-name">' + esc(it.name) + '</div>' +
+          '<div class="li-sub">' + sizeTxt + (is4k ? ' · <b style="color:#7cc4ff">4K</b>' : '') + '</div>' +
+          '</div>' +
+          (isVideo ? '<div class="li-ops"><button class="mini-btn" data-op="play">▶ 播放</button></div>' : '') +
+          '</div>');
         row.onclick = e => {
           if (e.target.dataset && e.target.dataset.op === 'play') { e.stopPropagation(); playDavFile(drive, it, sub); return; }
-          if (it.dir) { driveState.path = it.path.startsWith('/') ? it.path : sub.replace(/\/$/, '') + '/' + it.name + '/'; pageDrive(); }
+          if (it.dir) { driveState.path = it.path.indexOf('/') === 0 ? it.path : sub.replace(/\/$/, '') + '/' + it.name + '/'; pageDrive(); }
           else if (isVideo) playDavFile(drive, it, sub);
         };
         rows.appendChild(row);
+        if (isVideo) {
+          const playUrl = davFileUrl(drive, it, sub);
+          if (THUMBABLE.test(it.name) && !/tslist|\.m3u8|\.m2ts/i.test(playUrl)) {
+            thumbItems.push({ url: playUrl, img: row.querySelector('.li-thumb img'), ph: row.querySelector('.li-ph') });
+          } else {
+            row.querySelector('.li-ph').classList.remove('loading');
+          }
+        }
       });
-      if (!items.length) box.appendChild(UI.empty('此目录为空'));
+      if (!shown.length) box.appendChild(UI.empty('此目录没有匹配的文件'));
       box.appendChild(rows);
+      genRowThumbs(box, thumbItems);
       KeyNav.focusFirst(box);
     } catch (e) {
       box.innerHTML = '';
@@ -1699,6 +1823,11 @@ const App = (() => {
     dl: SIC('<path d="M12 4v11M7.5 11.5L12 16l4.5-4.5M4 19.5h16"/>'),
     ul: SIC('<path d="M12 16V5M7.5 9.5L12 5l4.5 4.5M4 19.5h16"/>'),
     trash: SIC('<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>'),
+    folder: SIC('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    film: SIC('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7.5 4v16M16.5 4v16M3 9h4.5M3 15h4.5M16.5 9H21M16.5 15H21"/>'),
+    file: SIC('<path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/>'),
+    hd: SIC('<rect x="3" y="8" width="18" height="8" rx="2.5"/><circle cx="17.2" cy="12" r="1.1"/><path d="M6.5 12h5"/>'),
+    usb: SIC('<rect x="9" y="2.5" width="6" height="11" rx="1.5"/><path d="M10.5 5.5h.01M13.5 5.5h.01M12 13.5V19M8.5 19h7v2.5h-7z"/>'),
   };
 
   function pageSet() {
