@@ -1,7 +1,7 @@
 /* 影视TV Service Worker:静态资源离线缓存
  * 代理/接口请求永不缓存(实时数据)。版本号改动即可刷新缓存。
  */
-const CACHE = 'tvw-static-v34';
+const CACHE = 'tvw-static-v35';
 const STATIC = [
   '/', '/index.html', '/css/style.css',
   '/js/store.js', '/js/api.js', '/js/keynav.js', '/js/player.js', '/js/ui.js', '/js/app.js',

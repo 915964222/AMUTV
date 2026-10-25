@@ -830,3 +830,14 @@ body::before { background: none; }
 .intro { max-width: 760px; text-shadow: 0 1px 10px rgba(0, 0, 0, .7); color: #c9c9cf; }
 .ep-section { position: relative; z-index: 1; padding: 0 24px; }
 @media (max-width: 720px) { .detail-head { margin-top: -240px; } .detail-info h1 { font-size: 26px; } }
+
+/* ============ 详情页英雄区修正(海报模糊氛围背景) ============ */
+.backdrop {
+  height: 500px;
+  filter: blur(26px) brightness(.5) saturate(1.15);
+  transform: scale(1.15);
+  mask-image: linear-gradient(180deg, #000 46%, rgba(0,0,0,.5) 74%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 46%, rgba(0,0,0,.5) 74%, transparent 100%);
+}
+.detail-head { margin-top: -330px; }
+@media (max-width: 900px) { .detail-head { margin-top: -240px; } .backdrop { height: 420px; } }
