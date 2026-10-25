@@ -705,3 +705,15 @@ button, [data-f] { outline: none; }
 /* 开关卡片两列网格,消除长条松散感 */
 .settings .form.form-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .settings .form.form-opts > label { margin: 0; }
+
+/* ============ 设置页空白收紧 ============ */
+.page-title { margin-bottom: 12px !important; }
+.settings .src-list { margin-bottom: 10px; gap: 6px; }
+.settings .form { gap: 9px; }
+.settings .form + .form { margin-top: 8px; }
+.settings .form textarea { min-height: 72px; }
+.settings .form textarea + .btn { min-height: 42px; }
+.settings .section > .btn { margin-top: 8px !important; }
+.settings .hint { margin-top: 10px; }
+.form-paste { flex-wrap: wrap; }
+.form-paste textarea { flex: 1 1 100%; }

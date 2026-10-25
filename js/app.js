@@ -246,7 +246,7 @@ const App = (() => {
       const manual = UI.el('<div class="section" style="margin-top:14px"><h3>手动导入</h3><div class="form">' +
         '<input id="live-url" data-f tabindex="-1" placeholder="M3U/txt 地址(http://…)">' +
         '<button class="btn primary" id="live-add-url" data-f tabindex="-1">导入URL</button></div>' +
-        '<div class="form" style="margin-top:10px"><textarea id="live-text" data-f tabindex="-1" placeholder="…或粘贴 M3U(#EXTINF…)/txt(频道名,地址) 内容"></textarea>' +
+        '<div class="form form-paste"><textarea id="live-text" data-f tabindex="-1" placeholder="…或粘贴 M3U(#EXTINF…)/txt(频道名,地址) 内容"></textarea>' +
         '<button class="btn" id="live-add-text" data-f tabindex="-1">导入文本</button></div>' +
         '<div class="hint">支持 TVBox 配置里 lives 段的 m3u/txt;分组识别 #EXTINF group-title 与 组名,#genre# 两种格式。EPG 节目单自动匹配(51zmt 数据源)。</div></div>');
       if (pls.length) {
@@ -1000,11 +1000,11 @@ const App = (() => {
             <input id="repo-url" data-f tabindex="-1" placeholder="仓库地址(TVBox 配置 JSON)">
             <button class="btn primary" id="repo-add" data-f tabindex="-1">订阅</button>
           </div>
-          <div class="form" style="margin-top:10px">
+          <div class="form form-paste">
             <textarea id="repo-text" data-f tabindex="-1" placeholder="或直接粘贴 TVBox 配置 JSON 文本(单仓 sites / 多仓 urls / storeHouse)"></textarea>
             <button class="btn" id="repo-parse" data-f tabindex="-1">解析粘贴内容</button>
           </div>
-          <button class="btn" id="cfg-push-btn" data-f tabindex="-1" style="margin-top:8px">手机扫码推送配置</button>
+          <button class="btn" id="cfg-push-btn" data-f tabindex="-1">手机扫码推送配置</button>
           <div class="hint">自动解析配置中的苹果CMS影视站(type 0/1)并加入数据源;爬虫类源(csp_)网页版暂不支持。解析会保留上次结果,删除仓库会一并移除其源。</div>
         </div>
         <div class="section">
@@ -1035,7 +1035,7 @@ const App = (() => {
             </select>
             <input id="drv-name" data-f tabindex="-1" placeholder="名称">
           </div>
-          <div class="form" style="margin-top:10px">
+          <div class="form form-paste">
             <input id="drv-url" data-f tabindex="-1" placeholder="服务地址,如 http://192.168.1.5:5244">
             <input id="drv-token" data-f tabindex="-1" placeholder="Alist Token / WebDAV 账号:密码">
             <input id="drv-user" data-f tabindex="-1" placeholder="账号(WebDAV)" style="flex:0 0 150px">
