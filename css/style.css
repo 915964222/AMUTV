@@ -736,3 +736,26 @@ button, [data-f] { outline: none; }
 .pl-ctrls .pc-wide { height: 46px; padding: 0 16px; background: transparent; border: none; }
 .pl-ctrls .pc-wide span { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.92); }
 .pl-ctrls .pc-wide:hover { background: rgba(255,255,255,.14); }
+
+/* ============ 播放器·参考图终版3(紧凑大图标+轻底描边) ============ */
+.pl-ctrls { gap: 6px; }
+.pl-ctrls .pc-btn {
+  width: 52px; height: 52px;
+  background: rgba(0, 0, 0, .38); border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.pl-ctrls .pc-btn svg { width: 26px; height: 26px; }
+.pl-ctrls .pc-btn:hover { background: rgba(255, 255, 255, .2); border-color: rgba(255,255,255,.3); }
+.pl-ctrls .pc-play { width: 60px; height: 60px; background: #fff; border: none; }
+.pl-ctrls .pc-play svg { width: 28px; height: 28px; }
+.pl-ctrls .pc-wide {
+  height: 52px; padding: 0 18px;
+  background: rgba(0, 0, 0, .38); border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.pl-ctrls .pc-wide svg { width: 22px; height: 22px; }
+.pl-ctrls .pc-wide span { font-size: 14.5px; font-weight: 600; }
+.pl-ctrls .pc-wide:hover { background: rgba(255, 255, 255, .2); }
+.pl-time-row { gap: 14px; margin-bottom: 10px; }
+.pl-bottom { padding: 88px 28px 16px; }
+.pl-title .t-name { font-size: 24px; }
