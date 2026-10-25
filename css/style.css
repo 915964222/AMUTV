@@ -668,3 +668,40 @@ button, [data-f] { outline: none; }
 .skip-intro:hover, .skip-intro:focus { background: rgba(255, 255, 255, .26); transform: scale(1.03); box-shadow: var(--focus-ring); }
 /* 横排面板贴齐新底栏 */
 .pl-strip { bottom: 118px; }
+
+/* ============ 设置页排版修正层 ============ */
+/* 节奏统一:分区间距/内边距,修复底部裁切 */
+.settings .section { padding: 20px 24px 24px; margin-bottom: 14px; }
+.settings { padding-bottom: 24px; }
+.settings .hint { margin-top: 14px; }
+/* 表单行:名称窄列 + 地址宽列 + 定宽按钮,严格对齐 */
+.settings .form { display: flex; gap: 10px; align-items: stretch; }
+.settings .form input { flex: 1 1 0; min-width: 0; height: 42px; }
+.settings .form #src-name, .settings .form #repo-name, .settings .form #drv-name { flex: 0 0 170px; }
+.settings .form #src-api, .settings .form #repo-url, .settings .form #drv-url { flex: 2.4 1 0; }
+.settings .form .btn { flex: none; height: auto; min-height: 42px; border-radius: 10px; padding: 0 22px; }
+/* 粘贴区:文本域整行,按钮变普通全宽条(不再是突兀大椭圆) */
+.settings .form textarea { flex: 1 1 100%; }
+.settings .form textarea + .btn {
+  align-self: stretch; border-radius: 10px; min-height: 42px; padding: 0 22px; font-size: 14px;
+}
+/* 独立按钮(扫码推送等)统一 ghost 样式 */
+.settings > .section > .btn, .settings .section > .btn {
+  height: 42px; border-radius: 10px; padding: 0 22px; font-size: 14px;
+}
+/* 源列表项:右侧操作按钮小号化,与文字行对齐 */
+.settings .src-item .btn, .settings .src-item button {
+  height: 32px; padding: 0 14px; border-radius: 8px; font-size: 12.5px; flex: none;
+}
+.settings .src-item { padding: 13px 16px; gap: 14px; }
+.settings .src-item .s-name { font-size: 14px; }
+.settings .src-item .s-api { font-size: 11px; margin-top: 2px; }
+/* 灰阶层次拉开:卡片/输入/悬停三档分明 */
+.settings .section { background: #131315; }
+.settings .form input, .settings .form textarea, .settings .form select { background: #1f1f22; border: 1px solid #333338; }
+.settings .form input:hover, .settings .form textarea:hover { background: #26262a; border-color: #44444a; }
+.settings .form input:focus, .settings .form textarea:focus { background: #26262a; border-color: rgba(245, 166, 35, .6); }
+.settings label input[type="number"] { background: #1f1f22; border-color: #333338; }
+/* 开关卡片两列网格,消除长条松散感 */
+.settings .form.form-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.settings .form.form-opts > label { margin: 0; }

@@ -987,7 +987,7 @@ const App = (() => {
           <div class="src-list" id="src-list"></div>
           <div class="form">
             <input id="src-name" data-f tabindex="-1" placeholder="名称(如:我的采集源)">
-            <input id="src-api" data-f tabindex="-1" placeholder="接口地址,如 https://xxx.com/api.php/provide/vod/">
+            <input id="src-api" data-f tabindex="-1" placeholder="接口地址(api.php/provide/vod)">
             <button class="btn primary" id="src-add" data-f tabindex="-1">添加源</button>
           </div>
           <div class="hint">支持苹果CMS V10 采集接口(参数 ac=detail / videolist 均可自动兼容)。</div>
@@ -997,21 +997,21 @@ const App = (() => {
           <div class="src-list" id="repo-list"></div>
           <div class="form">
             <input id="repo-name" data-f tabindex="-1" placeholder="备注名(可空)">
-            <input id="repo-url" data-f tabindex="-1" placeholder="仓库地址:TVBox 配置 JSON(http:// 或本地 file 导入用下方粘贴)">
+            <input id="repo-url" data-f tabindex="-1" placeholder="仓库地址(TVBox 配置 JSON)">
             <button class="btn primary" id="repo-add" data-f tabindex="-1">订阅</button>
           </div>
           <div class="form" style="margin-top:10px">
-            <textarea id="repo-text" data-f tabindex="-1" placeholder="…或直接粘贴 TVBox 配置 JSON 文本(支持单仓 sites / 多仓 urls / storeHouse)"></textarea>
+            <textarea id="repo-text" data-f tabindex="-1" placeholder="或直接粘贴 TVBox 配置 JSON 文本(单仓 sites / 多仓 urls / storeHouse)"></textarea>
             <button class="btn" id="repo-parse" data-f tabindex="-1">解析粘贴内容</button>
           </div>
-          <button class="btn" id="cfg-push-btn" data-f tabindex="-1" style="margin-top:8px">📱 手机扫码推送配置</button>
+          <button class="btn" id="cfg-push-btn" data-f tabindex="-1" style="margin-top:8px">手机扫码推送配置</button>
           <div class="hint">自动解析配置中的苹果CMS影视站(type 0/1)并加入数据源;爬虫类源(csp_)网页版暂不支持。解析会保留上次结果,删除仓库会一并移除其源。</div>
         </div>
         <div class="section">
           <h3>弹幕接口配置</h3>
           <div class="form">
-            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName} 占位,返回B站XML或dandanplay JSON;留空=用官方)">
-            <input id="dm-appid" data-f tabindex="-1" placeholder="弹弹play AppId(官方接口需要,dev.dandanplay.com 申请)" style="flex:1 1 45%">
+            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName};留空=官方)">
+            <input id="dm-appid" data-f tabindex="-1" placeholder="弹弹play AppId(dev.dandanplay.com 申请)" style="flex:1 1 45%">
             <input id="dm-secret" data-f tabindex="-1" type="password" placeholder="弹弹play AppSecret" style="flex:1 1 45%">
             <button class="btn primary" id="dm-save" data-f tabindex="-1">保存弹幕配置</button>
           </div>
@@ -1036,8 +1036,8 @@ const App = (() => {
             <input id="drv-name" data-f tabindex="-1" placeholder="名称">
           </div>
           <div class="form" style="margin-top:10px">
-            <input id="drv-url" data-f tabindex="-1" placeholder="服务地址,如 http://192.168.1.5:5244 (Alist) 或 https://dav.example.com/dav/">
-            <input id="drv-token" data-f tabindex="-1" placeholder="Alist Token(设置里复制);WebDAV 则填 账号:密码 或分别填下两项">
+            <input id="drv-url" data-f tabindex="-1" placeholder="服务地址,如 http://192.168.1.5:5244">
+            <input id="drv-token" data-f tabindex="-1" placeholder="Alist Token / WebDAV 账号:密码">
             <input id="drv-user" data-f tabindex="-1" placeholder="账号(WebDAV)" style="flex:0 0 150px">
             <input id="drv-pass" data-f tabindex="-1" type="password" placeholder="密码(WebDAV)" style="flex:0 0 150px">
             <button class="btn primary" id="drv-add" data-f tabindex="-1">挂载</button>
@@ -1050,7 +1050,7 @@ const App = (() => {
         </div>
         <div class="section">
           <h3>播放 / 搜索</h3>
-          <div class="form" style="align-items:center;flex-direction:column;gap:12px">
+          <div class="form form-opts">
             <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
               <input type="checkbox" id="cfg-autoswitch" data-f tabindex="-1" ${cfg.autoSwitch ? 'checked' : ''} style="width:18px;height:18px">
               自动换源(播放失败时自动尝试其他源的同名影片,最多3次)
