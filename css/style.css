@@ -580,3 +580,91 @@ button, [data-f] { outline: none; }
 
 /* 免责声明分区 */
 .disclaimer .hint { font-size: 13px; }
+
+/* ============ 设置页美化 ============ */
+.settings .section {
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 16px; padding: 20px 22px 22px;
+  transition: border-color .2s;
+}
+.settings .section:hover { border-color: rgba(255, 255, 255, .13); }
+.settings .section h3 {
+  font-size: 15px; color: #fff; letter-spacing: .5px;
+  display: flex; align-items: center; gap: 9px; margin-bottom: 16px;
+}
+.settings .section h3::before {
+  content: ''; width: 3px; height: 15px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), var(--accent2)); margin: 0; font-size: 0;
+}
+.settings .form input, .settings .form select {
+  height: 42px; padding: 0 14px; font-size: 13.5px;
+  background: #1b1b1d; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px;
+}
+.settings .form textarea {
+  background: #1b1b1d; border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px;
+  padding: 12px 14px; font-size: 13.5px; line-height: 1.6;
+}
+.settings .form input:hover, .settings .form textarea:hover, .settings .form select:hover {
+  background: #222225; border-color: rgba(255, 255, 255, .14);
+}
+.settings .form input:focus, .settings .form textarea:focus, .settings .form select:focus {
+  background: #222225; border-color: rgba(245, 166, 35, .55); box-shadow: none;
+}
+.settings .form .btn { height: 42px; padding: 0 24px; border-radius: 10px; font-size: 14px; flex: none; }
+.settings .form textarea + .btn, .settings .form .btn.full { align-self: stretch; }
+.settings .src-item {
+  border: 1px solid rgba(255, 255, 255, .06); border-radius: 12px; padding: 12px 16px;
+}
+.settings .src-item:hover { border-color: rgba(255, 255, 255, .12); }
+.settings .src-item.active-src { background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .35); }
+.settings .form > label {
+  background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .05);
+  border-radius: 10px; padding: 11px 14px; width: 100%; font-size: 13.5px;
+}
+.settings .form > label:hover { background: rgba(255, 255, 255, .06); }
+.settings label input[type="checkbox"] { accent-color: #f5a623; flex: none; }
+.settings label input[type="number"] {
+  background: #1b1b1d; border: 1px solid rgba(255, 255, 255, .08); border-radius: 8px;
+  height: 30px; padding: 0 8px; font-size: 13px; color: #fff;
+}
+.settings .hint { padding-left: 2px; }
+.settings .cap-grid { gap: 8px; }
+
+/* ============ 播放器精修层(Apple TV 风格排版) ============ */
+/* 顶栏:返回/收藏改裸图标(无边框玻璃圆),悬停才浮出底色 */
+.pl-top .pc-btn {
+  width: 42px; height: 42px; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+  color: rgba(255, 255, 255, .88); opacity: .95;
+}
+.pl-top .pc-btn:hover { background: rgba(255, 255, 255, .12); color: #fff; transform: scale(1.04); }
+.pl-top { gap: 12px; padding: 20px 24px 60px; }
+.pl-title { gap: 9px; }
+.pl-title .t-name { font-size: 17px; font-weight: 700; letter-spacing: .2px; opacity: .98; }
+.pl-title .t-ep { font-size: 12.5px; font-weight: 500; color: rgba(255, 255, 255, .62); }
+/* 底栏:控件更紧凑,玻璃圆钮统一 44,主播放键 58 白底 */
+.pl-bottom { padding: 96px 24px 18px; }
+.pl-ctrls { margin-top: 10px; gap: 14px; }
+.pl-ctrls .pc-btn { width: 44px; height: 44px; background: rgba(30, 30, 32, .72); }
+.pl-ctrls .pc-btn:hover { background: rgba(70, 70, 74, .92); }
+.pl-ctrls .pc-play { width: 58px; height: 58px; }
+.pl-ctrls .pc-wide { height: 44px; width: auto; padding: 0 18px; border-radius: 999px; }
+.pl-ctrls .pc-wide span { font-size: 13.5px; font-weight: 600; }
+/* 时间与进度条 */
+.pl-time { font-size: 12.5px; letter-spacing: .4px; color: rgba(255, 255, 255, .82); }
+.pl-time-row { gap: 16px; }
+.pl-track .rail { height: 4px; border-radius: 2px; }
+.pl-track:hover .rail, .pl-track:focus .rail { height: 7px; }
+.pl-track .fill { background: linear-gradient(90deg, #fff, #fff); border-radius: 2px; }
+.pl-track .fill .thumb { width: 13px; height: 13px; box-shadow: 0 1px 8px rgba(0, 0, 0, .6); }
+.pl-buf { background: rgba(255, 255, 255, .22); }
+/* 跳过片头药丸 */
+.skip-intro {
+  position: static; margin: 10px 0 0; align-self: flex-start;
+  background: rgba(255, 255, 255, .14); color: #fff; border: 1px solid rgba(255, 255, 255, .22);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  transition: background .18s, transform .18s;
+}
+.skip-intro:hover, .skip-intro:focus { background: rgba(255, 255, 255, .26); transform: scale(1.03); box-shadow: var(--focus-ring); }
+/* 横排面板贴齐新底栏 */
+.pl-strip { bottom: 118px; }
