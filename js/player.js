@@ -185,6 +185,8 @@ const Player = (() => {
           <button class="fn" data-act="src" data-f tabindex="-1">换源</button>
           <button class="fn" data-act="speed" data-f tabindex="-1">倍速</button>
           <button class="fn" data-act="ratio" data-f tabindex="-1">画面</button>
+          <button class="fn" data-act="sub" data-f tabindex="-1">字幕</button>
+          <button class="fn" data-act="dm" data-f tabindex="-1">弹幕</button>
           <button class="fn" data-act="sniff" data-f tabindex="-1">嗅探</button>
           <button class="fn" data-act="pset" data-f tabindex="-1">更多</button>
         </div>
@@ -225,6 +227,8 @@ const Player = (() => {
         else if (act === 'fs') toggleFs();
         else if (act === 'speed') cycleSpeed(btn);
         else if (act === 'ratio') cycleRatio();
+        else if (act === 'sub') cycleSubTrack(btn);
+        else if (act === 'dm') toggleDmQuick(btn);
         else if (act === 'pset') togglePset();
         else if (act === 'skipintro') skipIntroNow();
         else if (act === 'favors') toggleFavBtn(btn);
@@ -631,6 +635,50 @@ const Player = (() => {
     }
   }
 
+    /* ---------- 弹幕状态与控件(dm 声明在模块级,exit 时统一销毁) ---------- */
+  function ensureDanmaku() {
+    if (dm || !window.Danmaku) return;
+    const saved = JSON.parse(localStorage.getItem('tvw_danmaku') || '{"on":true,"opacity":0.85,"fontScale":1,"speed":1,"text":""}');
+    dm = window.Danmaku.createRenderer(root, () => video);
+    dm.setOpacity(typeof saved.opacity === 'number' ? saved.opacity : 0.85);
+    dm.setFontScale(typeof saved.fontScale === 'number' ? saved.fontScale : 1);
+    dm.setSpeed(saved.speed); // setSpeed 内部对非法值兜底为1
+    dm.setOn(saved.on && !!saved.text);
+    if (saved.text) { try { dm.setItems(window.Danmaku.parseXML(saved.text)); } catch (e) {} }
+  }
+  function saveDm() {
+    if (!dm) return;
+    localStorage.setItem('tvw_danmaku', JSON.stringify({
+      on: dm.state.on, opacity: dm.state.opacity, fontScale: dm.state.fontScale, speed: dm.state.speed,
+      text: (localStorage.getItem('tvw_danmaku') && JSON.parse(localStorage.getItem('tvw_danmaku')).text) || '',
+    }));
+  }
+
+  /* 快捷字幕:循环内嵌字幕轨,无轨则打开设置条 */
+  function cycleSubTrack(btn) {
+    const list = subTrackList();
+    if (!list.length) {
+      if (window.toast) toast('无内嵌字幕,可在「更多」搜在线字幕');
+      togglePset();
+      return;
+    }
+    let cur = -1;
+    list.forEach(function (t, i) { if (t.track.mode === 'showing') cur = i; });
+    const next = cur + 1 >= list.length ? -1 : cur + 1;
+    list.forEach(function (t, i) { t.track.mode = (i === next ? 'showing' : 'hidden'); });
+    const label = next < 0 ? '字幕' : '字幕·' + list[next].name;
+    if (btn) btn.textContent = label;
+    if (window.toast) toast(next < 0 ? '字幕已关闭' : '字幕:' + list[next].name);
+  }
+  /* 快捷弹幕开关 */
+  function toggleDmQuick(btn) {
+    ensureDanmaku();
+    if (!dm || !window.Danmaku) { if (window.toast) toast('弹幕组件未加载'); return; }
+    dm.setOn(!dm.state.on);
+    saveDm();
+    if (btn) btn.textContent = dm.state.on ? '弹幕·开' : '弹幕·关';
+    if (window.toast) toast(dm.state.on ? '弹幕已开' : '弹幕已关');
+  }
   /* ---------- 播放设置抽屉:画质/音轨/字幕/内核/倍速/比例/片头片尾 ---------- */
   function togglePset() {
     const old = root.querySelector('.pl-strip');
@@ -640,25 +688,6 @@ const Player = (() => {
     const body = d.querySelector('.d-body');
     root.appendChild(d);
     KeyNav.setModal(true);
-
-    /* ---------- 弹幕状态与控件(dm 声明在模块级,exit 时统一销毁) ---------- */
-    function ensureDanmaku() {
-      if (dm || !window.Danmaku) return;
-      const saved = JSON.parse(localStorage.getItem('tvw_danmaku') || '{"on":true,"opacity":0.85,"fontScale":1,"speed":1,"text":""}');
-      dm = window.Danmaku.createRenderer(root, () => video);
-      dm.setOpacity(typeof saved.opacity === 'number' ? saved.opacity : 0.85);
-      dm.setFontScale(typeof saved.fontScale === 'number' ? saved.fontScale : 1);
-      dm.setSpeed(saved.speed); // setSpeed 内部对非法值兜底为1
-      dm.setOn(saved.on && !!saved.text);
-      if (saved.text) { try { dm.setItems(window.Danmaku.parseXML(saved.text)); } catch (e) {} }
-    }
-    function saveDm() {
-      if (!dm) return;
-      localStorage.setItem('tvw_danmaku', JSON.stringify({
-        on: dm.state.on, opacity: dm.state.opacity, fontScale: dm.state.fontScale, speed: dm.state.speed,
-        text: (localStorage.getItem('tvw_danmaku') && JSON.parse(localStorage.getItem('tvw_danmaku')).text) || '',
-      }));
-    }
 
     function render(body) {
       body.innerHTML = '';
