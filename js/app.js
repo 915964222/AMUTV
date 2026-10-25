@@ -92,8 +92,12 @@ const App = (() => {
       const { classes, latest } = homeCache.get(src.id);
 
       const root = UI.el('<div></div>');
-      // 继续观看已并入「历史」页(带进度条与续播)
-      // 分类快捷行(横向)
+
+      /* 1. Hero 精选轮播(取前几部有图的) */
+      const heroItems = latest.filter(it => it.pic).slice(0, 6);
+      if (heroItems.length >= 2) root.appendChild(buildHero(src, heroItems));
+
+      /* 2. 分类快捷行(横向) */
       if (classes.length) {
         const cats = UI.el('<section class="row-h"><div class="row-head">分类</div></section>');
         const cr = UI.el('<div class="cat-row"></div>');
@@ -105,7 +109,38 @@ const App = (() => {
         cats.appendChild(cr);
         root.appendChild(cats);
       }
-      // 最新(横向海报行)
+
+      /* 3. 继续观看(带进度条,点击续播;只显示正片且源仍存在,同名影片去重保留最近) */
+      const srcIds = new Set(DB.getSources().map(s => s.id));
+      const seenName = new Set();
+      const conts = DB.getHistory().filter(h => {
+        if (!h.vodId || !h.name || !srcIds.has(h.sourceId)) return false;
+        if (h.position <= 30) return false;
+        if (h.duration && h.position >= h.duration * 0.95) return false;
+        if (seenName.has(h.name)) return false;
+        seenName.add(h.name);
+        return true;
+      }).slice(0, 12);
+      if (conts.length) root.appendChild(buildContRow(conts));
+
+      /* 4. 我的收藏(有收藏才显示) */
+      const favs = DB.getFavs();
+      if (favs.length) {
+        const sec = UI.el('<section class="row-h"><div class="row-head">我的收藏</div></section>');
+        const g = UI.el('<div class="hscroll poster-scroll"></div>');
+        favs.slice(0, 20).forEach(f => {
+          const c = UI.card({ id: f.vodId, name: f.name, pic: f.pic, remarks: '' });
+          c.onclick = () => App.openFromRecord(f);
+          g.appendChild(c);
+        });
+        sec.appendChild(g);
+        root.appendChild(sec);
+      }
+
+      /* 5. 分类内容行(电影/剧集/综艺/动漫等,懒加载) */
+      pickRows(classes).forEach(c => root.appendChild(buildCatRow(src, c)));
+
+      /* 6. 最近更新(横向海报行) */
       const sec = UI.el('<section class="row-h"><div class="row-head">最近更新</div></section>');
       const grid = UI.el('<div class="hscroll poster-scroll"></div>');
       latest.forEach(it => grid.appendChild(UI.card(it)));
@@ -119,6 +154,147 @@ const App = (() => {
       view().innerHTML = '';
       view().appendChild(UI.empty('加载失败:' + (e.message || e) + '<br>请检查数据源接口是否可用', '重试', () => { homeCache.delete(src.id); pageHome(); }));
     }
+  }
+
+  /* HTML转义(首页大字号文本防注入) */
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  /* 从分类列表挑首页内容行:按名称优先级匹配,不足时用剩余分类补齐(最多6行) */
+  function pickRows(classes) {
+    const want = [
+      { re: /电影|影院|剧场/, label: '电影' },
+      { re: /电视剧|连续剧|剧集|国产/, label: '电视剧' },
+      { re: /综艺|娱乐/, label: '综艺' },
+      { re: /动漫|动画|番剧|日韩/, label: '动漫' },
+    ];
+    const used = new Set();
+    const picks = [];
+    want.forEach(w => {
+      const c = classes.find(x => w.re.test(x.type_name) && !used.has(x.type_id));
+      if (c) { picks.push({ ...c, label: w.label }); used.add(c.type_id); }
+    });
+    for (const c of classes) {
+      if (picks.length >= 6) break;
+      if (used.has(c.type_id)) continue;
+      picks.push({ ...c, label: c.type_name });
+      used.add(c.type_id);
+    }
+    return picks.slice(0, 6);
+  }
+
+  /* Hero 大图轮播(海报做模糊背景+渐变遮罩,6秒自动轮播,悬停/聚焦暂停) */
+  function buildHero(src, items) {
+    const hero = UI.el(`<div class="hero" id="hero">
+      <div class="hero-bg"><img alt=""></div>
+      <div class="hero-shade"></div>
+      <div class="hero-info"></div>
+      <div class="hero-dots"></div>
+    </div>`);
+    const bgImg = hero.querySelector('.hero-bg img');
+    const info = hero.querySelector('.hero-info');
+    const dots = hero.querySelector('.hero-dots');
+    let idx = 0, timer = null, paused = false;
+
+    items.forEach((_, i) => {
+      const d = UI.el(`<span class="hero-dot${i ? '' : ' on'}" data-f tabindex="-1"></span>`);
+      d.onclick = () => show(i, true);
+      dots.appendChild(d);
+    });
+
+    async function playNow(it) {
+      try {
+        const d = await API.detailOf(src, it.id);
+        const groups = d && API.parsePlay(d.raw);
+        if (groups && groups.length) { playVod(src, d, groups, 0); return; }
+      } catch (_e) {}
+      goDetail(it);
+    }
+
+    function show(i, manual) {
+      idx = (i + items.length) % items.length;
+      const it = items[idx];
+      bgImg.onerror = () => { bgImg.style.display = 'none'; };
+      bgImg.style.display = '';
+      bgImg.src = it.pic || window.IMG_FB;
+      const meta = [it.year, it.area, it.remarks].filter(Boolean).map(esc).join('<i class="hdot-sep">·</i>');
+      info.innerHTML = `
+        <div class="hero-kicker">精选推荐</div>
+        <h2 class="hero-title">${esc(it.name)}</h2>
+        ${meta ? `<div class="hero-meta">${meta}</div>` : ''}
+        ${it.content && !/^(暂无|无简介|$)/.test(it.content) ? `<p class="hero-desc">${esc(it.content).slice(0, 110)}…</p>` : ''}
+        <div class="hero-btns">
+          <button class="hero-play" data-f tabindex="-1">▶ 播放</button>
+          <button class="hero-more" data-f tabindex="-1">查看详情</button>
+        </div>`;
+      hero.querySelector('.hero-play').onclick = () => playNow(it);
+      hero.querySelector('.hero-more').onclick = () => goDetail(it);
+      dots.querySelectorAll('.hero-dot').forEach((d, j) => d.classList.toggle('on', j === idx));
+      if (manual) restart();
+    }
+
+    function restart() {
+      clearInterval(timer);
+      timer = setInterval(() => { if (!paused) show(idx + 1); }, 6000);
+    }
+    hero.addEventListener('mouseenter', () => { paused = true; });
+    hero.addEventListener('mouseleave', () => { paused = false; });
+    hero.addEventListener('focusin', () => { paused = true; });
+    hero.addEventListener('focusout', () => { paused = false; });
+
+    show(0);
+    restart();
+    return hero;
+  }
+
+  /* 继续观看行:海报+底部进度条,点击续播 */
+  function buildContRow(list) {
+    const sec = UI.el('<section class="row-h"><div class="row-head">继续观看</div></section>');
+    const g = UI.el('<div class="hscroll poster-scroll"></div>');
+    list.forEach(h => {
+      const pct = h.duration ? Math.min(100, Math.round(h.position / h.duration * 100)) : 0;
+      const c = UI.el(`<div class="card cont-card" data-f tabindex="-1">
+        <div class="poster">
+          <img loading="lazy" src="${h.pic || window.IMG_FB}" ${IMG_ERR}>
+          <div class="cont-play">▶</div>
+          <div class="cont-prog"><div style="width:${pct}%"></div></div>
+        </div>
+        <div class="title">${esc(h.name)}</div>
+        <div class="cont-sub">看到 ${esc(h.epName || '第' + ((h.epIndex || 0) + 1) + '集')} · ${pct}%</div>
+      </div>`);
+      c.onclick = () => App.resumeHist(h);
+      g.appendChild(c);
+    });
+    sec.appendChild(g);
+    return sec;
+  }
+
+  /* 分类内容行:标题+「更多」+ 横向海报行(数据懒加载,失败/空则整行移除) */
+  function buildCatRow(src, cat) {
+    const sec = UI.el(`<section class="row-h">
+      <div class="row-head-row">
+        <div class="row-head">${esc(cat.label)}</div>
+        <button class="more-link" data-f tabindex="-1">更多 ›</button>
+      </div>
+      <div class="hscroll poster-scroll cat-loading">${UI.spinner()}</div>
+    </section>`);
+    sec.querySelector('.more-link').onclick = () => pageCategory(cat.type_id, cat.type_name, 1);
+    const grid = sec.querySelector('.hscroll');
+    (async () => {
+      let data;
+      try {
+        const key = src.id + '|' + cat.type_id + '|1';
+        if (!catCache.has(key)) catCache.set(key, await API.category(src, cat.type_id, 1));
+        data = catCache.get(key);
+      } catch (_e) { sec.remove(); return; }
+      if (!view().contains(sec)) return;
+      if (!data.list.length) { sec.remove(); return; }
+      grid.classList.remove('cat-loading');
+      grid.innerHTML = '';
+      data.list.slice(0, 20).forEach(it => grid.appendChild(UI.card(it)));
+    })();
+    return sec;
   }
 
 

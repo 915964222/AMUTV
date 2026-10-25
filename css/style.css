@@ -792,3 +792,196 @@ button, [data-f] { outline: none; }
 .pl-funcs .fn:focus { box-shadow: var(--focus-ring); }
 .pl-strip { bottom: 162px; }
 .skip-intro { bottom: 174px; }
+
+/* ============ 首页改版:Hero轮播 + 内容行 ============ */
+.hero {
+  position: relative; height: clamp(300px, 34vw, 470px);
+  border-radius: 18px; overflow: hidden; margin: 4px 0 14px;
+  background: linear-gradient(160deg, #17171b, #0d0d10);
+  isolation: isolate;
+}
+.hero-bg { position: absolute; inset: 0; z-index: -2; }
+.hero-bg img {
+  width: 100%; height: 100%; object-fit: cover; object-position: center 18%;
+  filter: blur(22px) brightness(.55) saturate(1.15);
+  transform: scale(1.18);
+}
+.hero-shade {
+  position: absolute; inset: 0; z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 45%, rgba(0,0,0,.15) 75%),
+    linear-gradient(0deg, rgba(0,0,0,.75) 0%, transparent 40%);
+}
+.hero-info { position: absolute; left: 44px; right: 44px; bottom: 40px; max-width: 640px; }
+.hero-kicker {
+  display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 3px;
+  color: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.28);
+  padding: 4px 12px; border-radius: 999px; margin-bottom: 14px;
+}
+.hero-title {
+  font-size: clamp(28px, 3.2vw, 44px); font-weight: 800; letter-spacing: 1px;
+  margin: 0 0 10px; text-shadow: 0 2px 18px rgba(0,0,0,.6);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hero-meta { font-size: 14px; color: rgba(255,255,255,.72); margin-bottom: 12px; }
+.hero-meta .hdot-sep { font-style: normal; margin: 0 8px; opacity: .5; }
+.hero-desc {
+  font-size: 14px; line-height: 1.7; color: rgba(255,255,255,.62); margin: 0 0 20px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hero-btns { display: flex; gap: 12px; }
+.hero-play {
+  background: #fff; color: #000; border: none; border-radius: 999px;
+  padding: 13px 38px; font-size: 16px; font-weight: 700; cursor: pointer;
+  transition: transform .18s, box-shadow .18s;
+}
+.hero-play:hover { transform: scale(1.04); box-shadow: 0 8px 30px rgba(255,255,255,.18); }
+.hero-play:focus { box-shadow: var(--focus-ring); }
+.hero-more {
+  background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.22);
+  border-radius: 999px; padding: 13px 32px; font-size: 16px; font-weight: 600;
+  backdrop-filter: blur(8px); cursor: pointer; transition: background .18s;
+}
+.hero-more:hover { background: rgba(255,255,255,.22); }
+.hero-more:focus { box-shadow: var(--focus-ring); }
+.hero-dots { position: absolute; right: 36px; bottom: 34px; display: flex; gap: 8px; }
+.hero-dot {
+  width: 8px; height: 8px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,255,255,.3); transition: all .25s;
+}
+.hero-dot.on { background: #fff; width: 22px; }
+.hero-dot:focus { box-shadow: var(--focus-ring); }
+
+/* 行标题 + 「更多」链接 */
+.row-head-row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0; }
+.row-head-row .row-head { margin: 0; }
+.more-link {
+  background: none; border: none; color: var(--muted); font-family: inherit;
+  font-size: 13px; font-weight: 600; cursor: pointer; padding: 6px 10px; border-radius: 999px;
+  transition: color .18s, background .18s;
+}
+.more-link:hover { color: #fff; background: rgba(255,255,255,.08); }
+.more-link:focus { box-shadow: var(--focus-ring); }
+
+/* 继续观看卡片 */
+.cont-play {
+  position: absolute; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(255,255,255,.92); color: #000;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; padding-left: 3px; opacity: 0; transition: opacity .2s;
+}
+.cont-card:hover .cont-play, .cont-card:focus .cont-play { opacity: 1; }
+.cont-prog {
+  position: absolute; z-index: 3; left: 10px; right: 10px; bottom: 8px;
+  height: 4px; border-radius: 999px; background: rgba(255,255,255,.25); overflow: hidden;
+}
+.cont-prog div { height: 100%; background: #fff; border-radius: 999px; }
+.cont-sub { margin-top: 3px; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-loading { min-height: 190px; align-items: center; justify-content: center; }
+
+@media (max-width: 700px) {
+  .hero { height: 300px; border-radius: 12px; }
+  .hero-info { left: 20px; right: 20px; bottom: 22px; }
+  .hero-desc { display: none; }
+  .hero-dots { right: 16px; bottom: 16px; }
+}
+
+/* ============ 播放器·设计稿定稿层(徽章OSD + 三集群控制行 + Tab抽屉) ============ */
+/* 顶栏:标题两行(片名行 + 徽章行),右侧工具按钮组 */
+.pl-top { align-items: flex-start; }
+.pl-title { flex-direction: column; align-items: flex-start; gap: 7px; }
+.pl-title .t-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.pl-title .t-name { font-size: 19px; font-weight: 800; }
+.pl-title .t-ep { font-size: 13px; font-weight: 500; color: rgba(255,255,255,.6); flex: none; }
+.pl-badges { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pl-badges .pb {
+  display: inline-flex; align-items: center; height: 21px; padding: 0 9px;
+  border-radius: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: .3px;
+  text-shadow: none; pointer-events: none;
+}
+.pb-src { background: rgba(255,255,255,.14); color: #f2f2f4; }
+.pb-q { background: linear-gradient(135deg, #2f6fed, #7a4dff); color: #fff; }
+.pb-dec { background: rgba(53,192,127,.16); color: #4ade8f; }
+.pb-resume { background: rgba(255,179,0,.18); color: #ffc94d; }
+.pl-top-right { margin-left: auto; display: flex; gap: 10px; align-items: center; flex: none; }
+.pl-top-right .pc-btn { width: 44px; height: 44px; background: rgba(28,28,30,.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.pl-top-right .pc-btn:hover { background: rgba(60,60,64,.9); }
+.pl-top-right .pc-btn.off { opacity: .42; }
+.pl-top-right .pc-btn.off svg { opacity: .9; }
+
+/* 控制行:左药丸集群 / 中播放集群 / 右工具集群 */
+.pl-ctrls { justify-content: space-between; gap: 12px; }
+.pl-ctrls .pc-left, .pl-ctrls .pc-right { display: flex; gap: 10px; align-items: center; order: initial; }
+.pl-ctrls .pc-mid { display: flex; gap: 12px; align-items: center; }
+.pl-ctrls .pc-btn { width: 46px; height: 46px; background: transparent; border: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.pl-ctrls .pc-btn:hover { background: rgba(255,255,255,.14); }
+.pl-ctrls .pc-play { width: 60px; height: 60px; margin: 0 4px; background: #fff; box-shadow: 0 0 0 5px rgba(255,255,255,.12); }
+.pl-ctrls .pc-play svg { width: 26px; height: 26px; }
+/* 药丸按钮(带快捷键角标) */
+.pl-ctrls .pill {
+  display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 18px;
+  border: none; border-radius: 999px; background: rgba(28,28,30,.72); color: #fff;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: background .18s, transform .18s;
+}
+.pl-ctrls .pill:hover { background: rgba(60,60,64,.9); transform: scale(1.05); }
+.pl-ctrls .pill:focus { box-shadow: var(--focus-ring); }
+.pl-ctrls .pill .kb {
+  font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 5px;
+  color: rgba(255,255,255,.55); border: 1px solid rgba(255,255,255,.22);
+}
+/* 音量:图标 + 拖动条 + 百分比 */
+.pl-ctrls .vol {
+  display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 12px 0 4px;
+  border-radius: 999px; background: rgba(28,28,30,.72);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.pl-ctrls .vol .pc-btn { width: 38px; height: 38px; background: transparent; }
+.pl-ctrls .vol-bar { width: 72px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.24); position: relative; cursor: pointer; touch-action: none; }
+.pl-ctrls .vol-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 3px; background: #fff; }
+.pl-ctrls .vol-pct { font-size: 12px; font-weight: 600; color: #e5e5ea; min-width: 22px; text-align: right; font-variant-numeric: tabular-nums; }
+/* 片头/片尾标记点 */
+.pl-track .rail .pl-marker { position: absolute; top: -3px; width: 3px; height: 12px; border-radius: 2px; }
+.pl-marker.m-op { background: #ff5d5d; }
+.pl-marker.m-ed { background: #a78bfa; }
+/* 悬浮时间提示(目标时间 / 区间说明) */
+.pl-tip {
+  bottom: 20px; background: rgba(24,24,26,.95); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); pointer-events: none; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* 跳过片头对齐新底栏 */
+.skip-intro { bottom: 150px; }
+.pl-strip { bottom: 150px; }
+
+/* 右侧 Tab 抽屉(选集/换源/字幕/弹幕) */
+.pl-drawer { top: 20px; bottom: 22px; width: min(360px, 92vw); background: rgba(18,18,20,.97); border-radius: 18px 0 0 18px; }
+.pl-drawer .d-head { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.pl-tabs { display: flex; gap: 6px; padding: 0 16px 12px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.pl-tab {
+  flex: 1; height: 34px; border: none; border-radius: 999px; background: transparent;
+  color: var(--muted); font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.pl-tab:hover { background: rgba(255,255,255,.09); color: #fff; }
+.pl-tab:focus { box-shadow: var(--focus-ring); }
+.pl-tab.current { background: #fff; color: #000; }
+.pl-drawer .ep-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pl-drawer .ep { width: 100%; height: 38px; padding: 0 6px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-drawer .ep.wide { grid-column: 1 / -1; height: 40px; text-align: left; padding: 0 14px; }
+.pl-drawer .d-body { padding: 14px 16px 18px; }
+
+/* 窄屏:收起快捷键角标与音量条,药丸紧凑 */
+@media (max-width: 860px) {
+  .pl-ctrls .pill { padding: 0 13px; font-size: 12.5px; }
+  .pl-ctrls .pill .kb { display: none; }
+  .pl-ctrls .vol-bar, .pl-ctrls .vol-pct { display: none; }
+  .pl-ctrls .vol { padding-right: 6px; }
+  .pl-ctrls .pc-btn { width: 42px; height: 42px; }
+  .pl-ctrls .pc-play { width: 54px; height: 54px; }
+  .pl-title .t-name { font-size: 16px; }
+  .pl-top-right .pc-btn { width: 40px; height: 40px; }
+}
