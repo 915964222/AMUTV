@@ -10,7 +10,7 @@ const Player = (() => {
   let saveTimer = null, hideTimer = null;
   let lastPos = 0, lastDur = 0;
 
-  const SEEK = 10;
+  const SEEK = 15;
 
   function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
 
@@ -180,27 +180,33 @@ const Player = (() => {
         </div>
       </div>
       <div class="pl-center"></div>
+      <div class="pl-pausehint" style="display:none">⏸ 暂停中</div>
       <div class="pl-bottom">
         <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
+        <div class="pl-seekprev" id="seekprev" style="display:none"><img id="sp-img" alt=""><span class="sp-time" id="sp-time">00:00</span></div>
         <div class="pl-time-row">
-          <span class="pl-timebox"><span class="pl-time" id="pl-cur">00:00</span><span class="pl-time sep">/</span><span class="pl-time" id="pl-dur">00:00</span></span>
+          <span class="pl-timebox"><span class="pl-time" id="pl-cur">00:00</span></span>
           <div class="pl-track" data-act="track" tabindex="-1" data-f>
             <div class="rail"><div class="pl-buf"></div><div class="fill" style="width:0%"><div class="thumb"></div></div></div>
             <div class="pl-tip" style="display:none"></div>
           </div>
-          <div class="pr-quick">
-            <button class="pr-btn" data-act="atrack" data-f tabindex="-1" style="display:none">音轨</button>
-            <button class="pr-btn" data-act="sub" data-f tabindex="-1">字幕</button>
-            <button class="pr-btn" data-act="speed" data-f tabindex="-1">x1</button>
-          </div>
+          <span class="pl-timebox right"><span class="pl-time" id="pl-dur">00:00</span><span class="pl-time remain" id="pl-remain"></span></span>
+        </div>
+        <div class="pl-transport">
+          <button class="tp-btn" data-act="prev" data-f tabindex="-1"><span class="tp-ic">${I.prev}</span><span class="tp-sub" id="tp-prev">上一集</span></button>
+          <button class="tp-btn" data-act="rew" data-f tabindex="-1"><span class="tp-ic">${I.rew}</span><span class="tp-sub">15秒</span></button>
+          <button class="tp-btn tp-play" data-act="play" data-f tabindex="-1">${I.pause}</button>
+          <button class="tp-btn" data-act="ff" data-f tabindex="-1"><span class="tp-ic">${I.ff}</span><span class="tp-sub">15秒</span></button>
+          <button class="tp-btn" data-act="next" data-f tabindex="-1"><span class="tp-ic">${I.next}</span><span class="tp-sub" id="tp-next">下一集</span></button>
         </div>
         <div class="pl-chips">
-          <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="kb">E</span></button>
-          <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="kb">S</span></button>
-          <button class="pill" data-act="dm" data-f tabindex="-1">弹幕:开</button>
-          <button class="pill" data-act="dec" data-f tabindex="-1">解码:硬解</button>
-          <button class="pill" data-act="q" data-f tabindex="-1">画质</button>
-          <button class="pill" data-act="pset" data-f tabindex="-1">更多<span class="kb">P</span></button>
+          <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="pv" id="pv-eps">-</span></button>
+          <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="pv" id="pv-src">-</span></button>
+          <button class="pill" data-act="speed" data-f tabindex="-1">倍速<span class="pv" id="pv-speed">1x</span></button>
+          <button class="pill" data-act="sub" data-f tabindex="-1">字幕<span class="pv" id="pv-sub">关</span></button>
+          <button class="pill" data-act="atrack" data-f tabindex="-1" style="display:none">音轨<span class="pv" id="pv-atrack">-</span></button>
+          <button class="pill" data-act="dm" data-f tabindex="-1">弹幕<span class="pv" id="pv-dm">开启</span></button>
+          <button class="pill" data-act="pset" data-f tabindex="-1">更多设置<span class="pv">比例/解码</span></button>
         </div>
       </div>
     </div>`);
@@ -210,8 +216,13 @@ const Player = (() => {
 
     /* 轻量状态层:时钟15秒刷新 + 网络状态 */
     if (clockTimer) clearInterval(clockTimer);
+    try { spDestroy(); } catch (e) {}
+    if (typeof updateStatusLayer === 'function' && updateStatusLayer._netHooked) { /* 保留全局钩子 */ }
+    lastDecBytes = 0; lastDecT = 0;
     updateStatusLayer();
-    clockTimer = setInterval(updateStatusLayer, 15000);
+    clockTimer = setInterval(updateStatusLayer, 1000);
+    video.addEventListener('pause', updatePauseHint);
+    video.addEventListener('play', updatePauseHint);
     if (!updateStatusLayer._netHooked && navigator.connection && navigator.connection.addEventListener) {
       navigator.connection.addEventListener('change', updateStatusLayer);
       updateStatusLayer._netHooked = true;
@@ -259,7 +270,62 @@ const Player = (() => {
         video.currentTime = p * video.duration;
         root.querySelector('.pl-track .fill').style.width = (p * 100) + '%';
         root.querySelector('#pl-cur').textContent = fmt(p * video.duration);
+        showSeekPreview(p, e.clientX);
       }
+    };
+    /* 擦洗悬浮缩略图:第二路video同源解码目标帧,seeked后画到悬浮框 */
+    let spv = null, spvHls = null, spCanvas = null;
+    const spDestroy = () => {
+      try { if (spvHls) { spvHls.destroy(); } } catch (e) {}
+      spvHls = null;
+      if (spv) { spv.removeAttribute('src'); try { spv.load(); } catch (e) {} spv.remove(); spv = null; }
+    };
+    const spEnsure = () => {
+      if (spv) return true;
+      const url = currentEpUrl();
+      if (!url) return false;
+      const u = DB.getConfig().proxyMode ? API.proxied(url) : url;
+      spv = document.createElement('video');
+      spv.muted = true; spv.crossOrigin = 'anonymous'; spv.preload = 'auto';
+      spv.playsInline = true; spv.setAttribute('playsinline', '');
+      spv.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none';
+      spCanvas = document.createElement('canvas');
+      spCanvas.width = 224;
+      spv.addEventListener('seeked', () => {
+        try {
+          if (!spv.videoWidth) return;
+          spCanvas.height = Math.max(2, Math.round(224 * spv.videoHeight / spv.videoWidth));
+          spCanvas.getContext('2d').drawImage(spv, 0, 0, spCanvas.width, spCanvas.height);
+          const img = root.querySelector('#sp-img');
+          if (img) img.src = spCanvas.toDataURL('image/jpeg', 0.55);
+        } catch (e) {}
+      });
+      if (/\.m3u8/i.test(url) && window.Hls && Hls.isSupported()) {
+        spvHls = new Hls({ maxBufferLength: 4, maxBufferSize: 20, enableWorker: true });
+        spvHls.on(Hls.Events.ERROR, (evt, data) => { if (data && data.fatal) spDestroy(); });
+        spvHls.loadSource(u); spvHls.attachMedia(spv);
+      } else {
+        spv.src = u;
+      }
+      document.body.appendChild(spv);
+      return true;
+    };
+    const showSeekPreview = (p, clientX) => {
+      if (iframe || !isFinite(video.duration) || video.duration <= 0) return;
+      const box = root.querySelector('#seekprev');
+      if (!box || !spEnsure()) return;
+      const rail2 = track.querySelector('.rail').getBoundingClientRect();
+      const t = Math.min(Math.max(0.1, p * video.duration), Math.max(0.1, video.duration - 0.5));
+      try { spv.currentTime = t; } catch (e) {}
+      box.style.display = 'block';
+      const half = 116;
+      box.style.left = Math.min(Math.max(clientX - half, 8), window.innerWidth - 240) + 'px';
+      const lb = box.querySelector('#sp-time');
+      if (lb) lb.textContent = fmt(t);
+    };
+    const hideSeekPreview = () => {
+      const box = root.querySelector('#seekprev');
+      if (box) box.style.display = 'none';
     };
     track.addEventListener('pointerdown', e => {
       scrubbing = true; state.scrubbing = true;
@@ -267,8 +333,8 @@ const Player = (() => {
       scrubTo(e); wake();
     });
     track.addEventListener('pointermove', e => { if (scrubbing) { scrubTo(e); wake(); } });
-    track.addEventListener('pointerup', e => { if (scrubbing) { scrubTo(e); scrubbing = false; state.scrubbing = false; wake(); } });
-    track.addEventListener('pointercancel', () => { scrubbing = false; state.scrubbing = false; wake(); });
+    track.addEventListener('pointerup', e => { if (scrubbing) { scrubTo(e); scrubbing = false; state.scrubbing = false; wake(); } hideSeekPreview(); });
+    track.addEventListener('pointercancel', () => { scrubbing = false; state.scrubbing = false; wake(); hideSeekPreview(); });
     const tip = root.querySelector('.pl-tip');
     track.addEventListener('mousemove', e => {
       if (!isFinite(video.duration) || !video.duration || !tip) return;
@@ -388,6 +454,7 @@ const Player = (() => {
     try { applyRatio(); } catch (_e) {}
     showCenter(`<div class="spinner"></div><div class="pl-msg">正在加载: ${ep.name}</div>`);
     destroyEngine();
+    try { spDestroy(); } catch (e) {}
 
     const url = DB.getConfig().proxyMode ? API.proxied(ep.url) : ep.url;
     const isIframe = /^https?:/i.test(ep.url) && !/\.(mp4|m3u8|mkv|webm)(\?|$)/i.test(ep.url) && !/\.mp4|m3u8/.test(ep.url);
@@ -660,19 +727,44 @@ const Player = (() => {
     root.querySelectorAll('.pl-chips [data-act="dm"]').forEach(b => b.textContent = '弹幕:' + (on ? '开' : '关'));
   }
   /* ---------- 轻量状态层:时钟/网络/画质徽章(纯展示,不接收点击) ---------- */
-  let clockTimer = 0;
+  let clockTimer = 0, lastDecBytes = 0, lastDecT = 0;
   function updateStatusLayer() {
     if (!root || !root.isConnected) return;
     const ck = root.querySelector('#st-clock');
-    if (ck) ck.textContent = new Date().toTimeString().slice(0, 5);
+    if (ck) { const d = new Date(); ck.textContent = new Date().toTimeString().slice(0, 5) + ' 星期' + '日一二三四五六'[d.getDay()]; }
     const nb = root.querySelector('#st-net');
     if (nb) {
       const c = navigator.connection || {};
       const et = (c.effectiveType || '').toUpperCase();
-      const txt = c.type === 'wifi' ? ('Wi-Fi' + (et ? ' · ' + et : '')) : (c.type === 'cellular' && et ? et : (et && /^5G|4G$/.test(et) ? et : '')) || '';
+      let txt = c.type === 'wifi' ? 'Wi-Fi' : (c.type === 'ethernet' ? '局域网' : (et || ''));
+      /* 实时网速:解码字节数差分(Chrome/WebView) */
+      if (video && video.webkitVideoDecodedByteCount && lastDecT) {
+        const kbps = (video.webkitVideoDecodedByteCount - lastDecBytes) / (Date.now() - lastDecT);   /* KB/s */
+        if (kbps > 8) txt += (txt ? ' ' : '') + (kbps >= 1024 ? (kbps / 1024).toFixed(1) + 'MB/s' : Math.round(kbps) + 'KB/s');
+      }
+      if (video) { lastDecBytes = video.webkitVideoDecodedByteCount || 0; lastDecT = Date.now(); }
       nb.style.display = txt ? '' : 'none';
       nb.textContent = txt;
     }
+    updateChipValues();
+  }
+  /* 深度配置层chips状态值 */
+  function updateChipValues() {
+    if (!root || !state) return;
+    const g = state.groups[state.groupIndex];
+    const set = (id, v) => { const e = root.querySelector('#' + id); if (e) e.textContent = v; };
+    set('pv-eps', (state.epIndex + 1) + '/' + (g ? g.eps.length : 0));
+    set('pv-src', (g && g.name) || state.fromName || '-');
+    set('pv-speed', 'x' + (video ? video.playbackRate : 1));
+    set('pv-dm', dm && dm.state && dm.state.on ? '开启 ' + Math.round((dm.state.opacity || 0.85) * 100) + '%' : '关闭');
+  }
+  /* 暂停中央轻提示 */
+  function updatePauseHint() {
+    if (!root || !video) return;
+    const h = root.querySelector('.pl-pausehint');
+    if (!h) return;
+    const show = video.paused && !video.ended && video.currentTime > 0.5 && !video.error;
+    h.style.display = show ? 'flex' : 'none';
   }
   function updateQualBadge() {
     if (!root || !video) return;
@@ -686,6 +778,8 @@ const Player = (() => {
         txt = h >= 2160 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : Math.round(lv.bitrate / 1000) + 'K';
         const fr = Number(lv.frameRate || (lv.attrs && lv.attrs['FRAME-RATE']) || 0);
         if (fr >= 50) txt += '/' + Math.round(fr);
+        const vr = lv.videoRange || (lv.attrs && lv.attrs['VIDEO-RANGE']) || '';
+        if (vr && vr !== 'SDR') txt += ' ' + (vr === 'PQ' ? 'HDR' : vr);
         if (hls.autoLevelEnabled) txt += '·自动';
       }
     } else if (video.videoHeight) {
@@ -697,14 +791,15 @@ const Player = (() => {
   /* ---------- 音轨/解码 循环(深度配置层快捷) ---------- */
   function updateAtrackLabels() {
     if (!root) return;
+    const chip = root.querySelector('[data-act="atrack"]');
+    if (!chip) return;
     const has = hls && hls.audioTracks && hls.audioTracks.length > 1;
-    root.querySelectorAll('[data-act="atrack"]').forEach(b => {
-      b.style.display = has ? '' : 'none';
-      if (has) {
-        const t = hls.audioTracks[hls.audioTrack] || {};
-        b.textContent = '音轨:' + (t.name || t.lang || '音轨' + (hls.audioTrack + 1));
-      }
-    });
+    chip.style.display = has ? '' : 'none';
+    if (has) {
+      const t = hls.audioTracks[hls.audioTrack] || {};
+      const pv2 = chip.querySelector('#pv-atrack');
+      if (pv2) pv2.textContent = t.name || t.lang || '音轨' + (hls.audioTrack + 1);
+    }
   }
   function cycleAtrack() {
     if (!hls || !hls.audioTracks || hls.audioTracks.length < 2) { if (window.toast) toast('当前流无可切换音轨'); return; }
@@ -734,7 +829,7 @@ const Player = (() => {
     const cur = SPEEDS.indexOf(video.playbackRate) === -1 ? 0 : SPEEDS.indexOf(video.playbackRate);
     const next = SPEEDS[(cur + 1) % SPEEDS.length];
     video.playbackRate = next;
-    root.querySelectorAll('[data-act="speed"]').forEach(b => b.textContent = b.classList.contains('pr-btn') ? 'x' + next : '倍速:' + next + 'x');
+    root.querySelectorAll('#pv-speed').forEach(b => b.textContent = 'x' + next);
   }
   function toggleFs() {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -842,9 +937,7 @@ const Player = (() => {
     list.forEach(function (t, i) { if (t.track.mode === 'showing') cur = i; });
     const next = cur + 1 >= list.length ? -1 : cur + 1;
     list.forEach(function (t, i) { t.track.mode = (i === next ? 'showing' : 'hidden'); });
-    root.querySelectorAll('[data-act="sub"]').forEach(function (b) {
-      b.textContent = b.classList.contains('pr-btn') ? (next < 0 ? '字幕' : '字幕·' + list[next].name) : ('字幕:' + (next < 0 ? '关' : list[next].name));
-    });
+    root.querySelectorAll('#pv-sub').forEach(function (b) { b.textContent = next < 0 ? '关' : list[next].name; });
     if (window.toast) toast(next < 0 ? '字幕已关闭' : '字幕:' + list[next].name);
   }
   /* 快捷弹幕开关 */
@@ -1592,6 +1685,11 @@ const Player = (() => {
     lastPos = video.currentTime; lastDur = video.duration || 0;
     try { onTimeExtra(); } catch (_e) {}
     root.querySelector('#pl-cur').textContent = fmt(video.currentTime);
+    const durEl = root.querySelector('#pl-dur'), remEl = root.querySelector('#pl-remain');
+    if (durEl && isFinite(video.duration) && video.duration > 0) {
+      durEl.textContent = fmt(video.duration);
+      if (remEl) remEl.textContent = video.duration - video.currentTime > 1 ? '(剩余 ' + fmt(video.duration - video.currentTime) + ')' : '';
+    }
     root.querySelector('#pl-dur').textContent = fmt(video.duration);
     if (isFinite(video.duration) && video.duration > 0) {
       root.querySelector('.pl-track .fill').style.width = (video.currentTime / video.duration * 100) + '%';
@@ -1636,6 +1734,27 @@ const Player = (() => {
     const epn = g && g.eps[state.epIndex] ? g.eps[state.epIndex].name : '';
     root.querySelector('.t-name').textContent = state.title || '';
     root.querySelector('.t-ep').textContent = epn ? '· ' + epn : '';
+    updateTpEps();
+    updateChipValues();
+  }
+  /* 核心播放行:上下集副标(第 N 集),无集可切时降透明度 */
+  function updateTpEps() {
+    if (!root || !state) return;
+    const g = state.groups[state.groupIndex];
+    if (!g) return;
+    const p = root.querySelector('#tp-prev'), n = root.querySelector('#tp-next');
+    if (p) {
+      const has = state.epIndex > 0;
+      p.style.opacity = has ? '' : '.35';
+      const s = p.querySelector('.tp-sub');
+      if (s) s.textContent = has ? '第 ' + state.epIndex + ' 集' : '上一集';
+    }
+    if (n) {
+      const has = state.epIndex < g.eps.length - 1;
+      n.style.opacity = has ? '' : '.35';
+      const s = n.querySelector('.tp-sub');
+      if (s) s.textContent = has ? '第 ' + (state.epIndex + 2) + ' 集' : '下一集';
+    }
   }
 
   /* ---------- 快捷键 ---------- */
