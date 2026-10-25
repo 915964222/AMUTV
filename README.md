@@ -6,6 +6,18 @@
 
 一个纯网页版的「影视TV」,界面与交互对标电视盒子的 TVBox / 影视仓,**零 npm 依赖,`node server.js` 一条命令即跑**。
 
+<img src="icons/icon-512.png" width="84" alt="AMUTV 小电视图标">
+
+## 📸 截图
+
+| 首页 · Hero 精选轮播 | 详情 · 三源评分与演职员 |
+|---|---|
+| ![首页](docs/screen-home.jpg) | ![详情](docs/screen-detail.jpg) |
+
+| 播放器 · 双层控制与暂停提示 |
+|---|
+| ![播放器](docs/screen-player.jpg) |
+
 </div>
 
 ---
