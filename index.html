@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#070b14">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=107">
+<link rel="stylesheet" href="css/style.css?v=108">
 </head>
 <body>
 <header id="topbar">
@@ -39,26 +39,26 @@
 <div id="toasts"></div>
 <div id="overlay-root"></div>
 
-<script src="ad-rules.js?v=107"></script>
-<script src="vendor/hls.min.js?v=107"></script>
-<script src="vendor/pinyin-pro.min.js?v=107"></script>
+<script src="ad-rules.js?v=108"></script>
+<script src="vendor/hls.min.js?v=108"></script>
+<script src="vendor/pinyin-pro.min.js?v=108"></script>
 <script>
   /* 本地 vendor 缺失时回退 CDN */
   if (!window.Hls) document.write('<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"><\/script>');
   if (!window.pinyinPro) document.write('<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.29.5/dist/index.min.js"><\/script>');
 </script>
-<script src="ad-rules.js?v=107"></script>
-<script src="js/scraper.js?v=107"></script>
-<script src="js/subtitle.js?v=107"></script>
-<script src="js/live.js?v=107"></script>
-<script src="js/cloud.js?v=107"></script>
-<script src="js/danmaku.js?v=107"></script>
-<script src="js/store.js?v=107"></script>
-<script src="js/api.js?v=107"></script>
-<script src="js/keynav.js?v=107"></script>
-<script src="js/player.js?v=107"></script>
-<script src="js/ui.js?v=107"></script>
-<script src="js/app.js?v=107"></script>
+<script src="ad-rules.js?v=108"></script>
+<script src="js/scraper.js?v=108"></script>
+<script src="js/subtitle.js?v=108"></script>
+<script src="js/live.js?v=108"></script>
+<script src="js/cloud.js?v=108"></script>
+<script src="js/danmaku.js?v=108"></script>
+<script src="js/store.js?v=108"></script>
+<script src="js/api.js?v=108"></script>
+<script src="js/keynav.js?v=108"></script>
+<script src="js/player.js?v=108"></script>
+<script src="js/ui.js?v=108"></script>
+<script src="js/app.js?v=108"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

@@ -718,3 +718,21 @@ button, [data-f] { outline: none; }
 /* 面板与跳过片头对齐通栏 */
 .pl-strip { left: 28px; right: 28px; bottom: 118px; }
 .skip-intro { right: 28px; bottom: 128px; }
+
+/* ============ 播放器·参考图终版2(左上两行标题+居中一行小图标) ============ */
+/* 顶栏:标题左对齐两行(片名 / S·E·集名),返回小图标在标题左侧 */
+.pl-top { align-items: flex-start; padding-top: 22px; }
+.pl-title { flex-direction: column; align-items: flex-start; gap: 5px; }
+.pl-title .t-name { font-size: 22px; font-weight: 800; line-height: 1.15; max-width: 60vw; }
+.pl-title .t-ep { font-size: 13.5px; font-weight: 500; color: rgba(255, 255, 255, .6); letter-spacing: .3px; }
+/* 控制行:居中一行等距小图标,播放键略大;选集去胶囊框改透明 */
+.pl-ctrls { justify-content: center; gap: 10px; }
+.pl-ctrls .pc-left, .pl-ctrls .pc-right { display: contents; }
+.pl-ctrls .pc-left .pc-btn, .pl-ctrls .pc-right .pc-btn { order: initial; }
+.pl-ctrls .pc-right .pc-wide { order: -1; }
+.pl-ctrls .pc-btn { width: 46px; height: 46px; background: transparent; }
+.pl-ctrls .pc-play { width: 54px; height: 54px; margin: 0 4px; box-shadow: 0 0 0 4px rgba(255,255,255,.12); }
+.pl-ctrls .pc-play svg { width: 24px; height: 24px; }
+.pl-ctrls .pc-wide { height: 46px; padding: 0 16px; background: transparent; border: none; }
+.pl-ctrls .pc-wide span { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.92); }
+.pl-ctrls .pc-wide:hover { background: rgba(255,255,255,.14); }
