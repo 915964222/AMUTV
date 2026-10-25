@@ -179,6 +179,15 @@ const Player = (() => {
           <div class="pl-track" data-act="track" tabindex="-1" data-f><div class="rail"><div class="fill" style="width:0%"></div></div></div>
           <span class="pl-time" id="pl-dur">00:00</span>
         </div>
+        <div class="pl-funcs">
+          <button class="fn" data-act="prev" data-f tabindex="-1">上一集</button>
+          <button class="fn" data-act="eps" data-f tabindex="-1">选集</button>
+          <button class="fn" data-act="src" data-f tabindex="-1">换源</button>
+          <button class="fn" data-act="speed" data-f tabindex="-1">倍速</button>
+          <button class="fn" data-act="ratio" data-f tabindex="-1">画面</button>
+          <button class="fn" data-act="sniff" data-f tabindex="-1">嗅探</button>
+          <button class="fn" data-act="pset" data-f tabindex="-1">更多</button>
+        </div>
         <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
         <div class="pl-ctrls">
           <div class="pc-left">
@@ -188,8 +197,7 @@ const Player = (() => {
             <button class="pc-btn" data-act="next" title="下一集"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M5 5l9 7-9 7z"/><rect x="16" y="5" width="3" height="14" rx="1"/></svg></button>
           </div>
           <div class="pc-right">
-            <button class="pc-btn pc-wide" data-act="eps" title="选集"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>选集</span></button>
-            <button class="pc-btn" data-act="pset" title="画质/音轨/倍速/换源/嗅探"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+            <button class="pc-btn" data-act="pset" title="画质/音轨/字幕/弹幕/解码"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
             <button class="pc-btn" data-act="fs" title="全屏"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
           </div>
         </div>

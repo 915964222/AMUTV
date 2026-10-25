@@ -780,3 +780,15 @@ button, [data-f] { outline: none; }
 .pl-ctrls .pc-wide span { display: none; }
 .pl-time { font-size: 14.5px; opacity: .95; }
 .pl-time-row { gap: 18px; }
+
+/* ============ 播放器功能文字行(com.github.tv 式) ============ */
+.pl-funcs { display: flex; gap: 6px; justify-content: center; margin: 12px 0 8px; flex-wrap: wrap; }
+.pl-funcs .fn {
+  background: none; border: none; color: #fff; font-family: inherit;
+  font-size: 14.5px; font-weight: 500; padding: 7px 15px; border-radius: 999px;
+  cursor: pointer; transition: background .16s;
+}
+.pl-funcs .fn:hover { background: rgba(255, 255, 255, .13); }
+.pl-funcs .fn:focus { box-shadow: var(--focus-ring); }
+.pl-strip { bottom: 162px; }
+.skip-intro { bottom: 174px; }
