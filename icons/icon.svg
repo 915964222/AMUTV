@@ -1,14 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#151f38"/><stop offset="1" stop-color="#070b14"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17171d"/><stop offset=".55" stop-color="#0e0e11"/><stop offset="1" stop-color="#08080a"/>
     </linearGradient>
-    <linearGradient id="tv" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffd166"/><stop offset=".5" stop-color="#ffb300"/><stop offset="1" stop-color="#ff7d1a"/>
+    <linearGradient id="scr" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fce5ba"/><stop offset=".45" stop-color="#edbb6e"/><stop offset="1" stop-color="#c48a37"/>
     </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".52" r=".55">
+      <stop offset="0" stop-color="#ffb300" stop-opacity=".34"/><stop offset=".6" stop-color="#ffb300" stop-opacity=".12"/><stop offset="1" stop-color="#ffb300" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
-  <rect x="96" y="150" width="320" height="230" rx="30" fill="none" stroke="url(#tv)" stroke-width="26"/>
-  <path d="M186 96 L256 160 L326 96" fill="none" stroke="url(#tv)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M228 214 L306 265 L228 316 Z" fill="url(#tv)"/>
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="100" fill="url(#glow)"/>
+  <g stroke="#edb563" stroke-width="10" stroke-linecap="round">
+    <path d="M198 168 L243 74"/><path d="M314 168 L269 74"/>
+  </g>
+  <circle cx="198" cy="168" r="5" fill="#edb563"/><circle cx="314" cy="168" r="5" fill="#edb563"/>
+  <circle cx="243" cy="74" r="5" fill="#edb563"/><circle cx="269" cy="74" r="5" fill="#edb563"/>
+  <rect x="86" y="159" width="340" height="194" rx="22" fill="#0b0b0e" stroke="#ffffff" stroke-opacity=".07" stroke-width="1.5"/>
+  <rect x="106" y="169" width="300" height="174" rx="13" fill="url(#scr)"/>
+  <text x="256" y="256" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="86" font-weight="700" fill="#221405" text-anchor="middle" dominant-baseline="central">AMU</text>
+  <rect x="231" y="353" width="50" height="25" rx="6" fill="#26262c"/>
+  <rect x="186" y="378" width="140" height="20" rx="9" fill="#1c1c21" stroke="#ffffff" stroke-opacity=".06" stroke-width="1"/>
 </svg>
