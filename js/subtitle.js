@@ -26,7 +26,7 @@
       if (!tm) return;
       const p = tm.split('-->');
       const start = toSec(p[0]);
-      const end = toSec(p[1].split(/\s+/)[0]);
+      const end = toSec(p[1].trim().split(/\s+/)[0]);
       const ti = lines.indexOf(tm);
       const text = lines.slice(ti + 1).join('\n').replace(/<[^>]+>/g, '').trim();
       if (text && end > start) cues.push({ start: start, end: end, text: text });

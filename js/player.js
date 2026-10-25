@@ -15,7 +15,7 @@ const Player = (() => {
   function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
 
   /* SVG 矢量图标(跨平台一致) */
-  const I = {"back": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M19 12H5\"/><path d=\"M12 19l-7-7 7-7\"/></svg>", "fav": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z\"/></svg>", "favOn": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z\"/></svg>", "rew": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 17l-5-5 5-5\"/><path d=\"M18 17l-5-5 5-5\"/></svg>", "play": "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"currentColor\"><path d=\"M6 4l14 8-14 8z\"/></svg>", "pause": "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"currentColor\"><rect x=\"5\" y=\"4\" width=\"5\" height=\"16\" rx=\"1\"/><rect x=\"14\" y=\"4\" width=\"5\" height=\"16\" rx=\"1\"/></svg>", "ff": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M13 17l5-5-5-5\"/><path d=\"M6 17l5-5-5-5\"/></svg>", "next": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"currentColor\"><path d=\"M5 5l9 7-9 7z\"/><rect x=\"16\" y=\"5\" width=\"3\" height=\"14\" rx=\"1\"/></svg>", "eps": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"><path d=\"M8 6h13M8 12h13M8 18h13\"/><circle cx=\"4\" cy=\"6\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4\" cy=\"12\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4\" cy=\"18\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/></svg>", "more": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"currentColor\"><circle cx=\"5\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"19\" cy=\"12\" r=\"2\"/></svg>", "fs": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M8 3H5a2 2 0 0 0-2 2v3\"/><path d=\"M16 3h3a2 2 0 0 1 2 2v3\"/><path d=\"M8 21H5a2 2 0 0 1-2-2v-3\"/><path d=\"M16 21h3a2 2 0 0 0 2-2v-3\"/></svg>"};
+  const I = {"back": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M19 12H5\"/><path d=\"M12 19l-7-7 7-7\"/></svg>", "fav": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z\"/></svg>", "favOn": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z\"/></svg>", "rew": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 17l-5-5 5-5\"/><path d=\"M18 17l-5-5 5-5\"/></svg>", "play": "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"currentColor\"><path d=\"M6 4l14 8-14 8z\"/></svg>", "pause": "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"currentColor\"><rect x=\"5\" y=\"4\" width=\"5\" height=\"16\" rx=\"1\"/><rect x=\"14\" y=\"4\" width=\"5\" height=\"16\" rx=\"1\"/></svg>", "ff": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M13 17l5-5-5-5\"/><path d=\"M6 17l5-5-5-5\"/></svg>", "next": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"currentColor\"><path d=\"M5 5l9 7-9 7z\"/><rect x=\"16\" y=\"5\" width=\"3\" height=\"14\" rx=\"1\"/></svg>", "eps": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"><path d=\"M8 6h13M8 12h13M8 18h13\"/><circle cx=\"4\" cy=\"6\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4\" cy=\"12\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4\" cy=\"18\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/></svg>", "more": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"currentColor\"><circle cx=\"5\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"19\" cy=\"12\" r=\"2\"/></svg>", "fs": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M8 3H5a2 2 0 0 0-2 2v3\"/><path d=\"M16 3h3a2 2 0 0 1 2 2v3\"/><path d=\"M8 21H5a2 2 0 0 1-2-2v-3\"/><path d=\"M16 21h3a2 2 0 0 0 2-2v-3\"/></svg>", "dm": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z\"/></svg>", "qr": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/><path d=\"M14 14h3v3h-3z\"/><path d=\"M21 14v.01\"/><path d=\"M14 21v.01\"/><path d=\"M21 21l-4-4\"/></svg>", "vol": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"M15.54 8.46a5 5 0 0 1 0 7.07\"/><path d=\"M19.07 4.93a10 10 0 0 1 0 14.14\"/></svg>", "volOff": "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"m23 9-6 6\"/><path d=\"m17 9 6 6\"/></svg>", "prev": "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"currentColor\"><path d=\"M19 5l-9 7 9 7z\"/><rect x=\"4\" y=\"5\" width=\"3\" height=\"14\" rx=\"1\"/></svg>"};
   const fmt = s => {
     s = Math.max(0, Math.floor(s || 0));
     const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
@@ -169,38 +169,51 @@ const Player = (() => {
       <video playsinline></video>
       <div class="pl-top">
         <button class="pc-btn" data-act="back" title="返回"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
-        <div class="pl-title"><span class="t-name"></span><span class="t-ep"></span></div>
-        <button class="pc-btn" data-act="favors" title="收藏"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+        <div class="pl-title">
+          <div class="t-row"><span class="t-name"></span><span class="t-ep"></span></div>
+          <div class="pl-badges"></div>
+        </div>
+        <div class="pl-top-right">
+          <button class="pc-btn" data-act="dm" title="弹幕开关">${I.dm}</button>
+          <button class="pc-btn" data-act="rcqr" title="手机遥控">${I.qr}</button>
+          <button class="pc-btn" data-act="favors" title="收藏">${I.fav}</button>
+        </div>
       </div>
       <div class="pl-center"></div>
       <div class="pl-bottom">
         <div class="pl-time-row">
           <span class="pl-time" id="pl-cur">00:00</span>
-          <div class="pl-track" data-act="track" tabindex="-1" data-f><div class="rail"><div class="fill" style="width:0%"></div></div></div>
+          <div class="pl-track" data-act="track" tabindex="-1" data-f>
+            <div class="rail"><div class="pl-buf"></div><div class="fill" style="width:0%"><div class="thumb"></div></div></div>
+            <div class="pl-tip" style="display:none"></div>
+          </div>
           <span class="pl-time" id="pl-dur">00:00</span>
-        </div>
-        <div class="pl-funcs">
-          <button class="fn" data-act="prev" data-f tabindex="-1">上一集</button>
-          <button class="fn" data-act="eps" data-f tabindex="-1">选集</button>
-          <button class="fn" data-act="src" data-f tabindex="-1">换源</button>
-          <button class="fn" data-act="speed" data-f tabindex="-1">倍速</button>
-          <button class="fn" data-act="ratio" data-f tabindex="-1">画面</button>
-          <button class="fn" data-act="sub" data-f tabindex="-1">字幕</button>
-          <button class="fn" data-act="dm" data-f tabindex="-1">弹幕</button>
-          <button class="fn" data-act="sniff" data-f tabindex="-1">嗅探</button>
-          <button class="fn" data-act="pset" data-f tabindex="-1">更多</button>
         </div>
         <button class="pbtn skip-intro" data-act="skipintro" style="display:none">跳过片头 ⏭</button>
         <div class="pl-ctrls">
           <div class="pc-left">
-            <button class="pc-btn" data-act="rew" title="快退10秒"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 17l-5-5 5-5"/><path d="M18 17l-5-5 5-5"/></svg></button>
-            <button class="pc-btn pc-play" data-act="play" title="暂停/播放"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 4l14 8-14 8z"/></svg></button>
-            <button class="pc-btn" data-act="ff" title="快进10秒"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/></svg></button>
-            <button class="pc-btn" data-act="next" title="下一集"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M5 5l9 7-9 7z"/><rect x="16" y="5" width="3" height="14" rx="1"/></svg></button>
+            <button class="pill" data-act="src" data-f tabindex="-1">换源<span class="kb">S</span></button>
+            <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="kb">E</span></button>
+            <button class="pill" data-act="sniff" data-f tabindex="-1">嗅探<span class="kb">V</span></button>
+          </div>
+          <div class="pc-mid">
+            <button class="pc-btn" data-act="prev" title="上一集">${I.prev}</button>
+            <button class="pc-btn" data-act="rew" title="快退10秒">${I.rew}</button>
+            <button class="pc-btn pc-play" data-act="play" title="暂停/播放">${I.pause}</button>
+            <button class="pc-btn" data-act="ff" title="快进10秒">${I.ff}</button>
+            <button class="pc-btn" data-act="next" title="下一集">${I.next}</button>
           </div>
           <div class="pc-right">
-            <button class="pc-btn" data-act="pset" title="画质/音轨/字幕/弹幕/解码"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
-            <button class="pc-btn" data-act="fs" title="全屏"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+            <div class="vol" data-f tabindex="-1">
+              <button class="pc-btn vol-ic" data-act="mute" title="静音">${I.vol}</button>
+              <div class="vol-bar"><i></i></div>
+              <span class="vol-pct">100</span>
+            </div>
+            <button class="pill" data-act="sub" data-f tabindex="-1">字幕</button>
+            <button class="pill" data-act="q" data-f tabindex="-1">画质</button>
+            <button class="pill" data-act="speed" data-f tabindex="-1">x1</button>
+            <button class="pc-btn" data-act="pset" title="设置">${I.more}</button>
+            <button class="pc-btn" data-act="fs" title="全屏">${I.fs}</button>
           </div>
         </div>
       </div>
@@ -226,10 +239,12 @@ const Player = (() => {
         else if (act === 'sniff') toggleSniff();
         else if (act === 'fs') toggleFs();
         else if (act === 'speed') cycleSpeed(btn);
-        else if (act === 'ratio') cycleRatio();
+        else if (act === 'q') cycleQuality();
         else if (act === 'sub') cycleSubTrack(btn);
         else if (act === 'dm') toggleDmQuick(btn);
+        else if (act === 'mute') { if (video) { video.muted = !video.muted; updateVolUI(); } }
         else if (act === 'pset') togglePset();
+        else if (act === 'rcqr') { togglePset(); const rb = [...root.querySelectorAll('.pl-strip .ep')].find(x => x.textContent.includes('远程遥控')); if (rb) rb.click(); }
         else if (act === 'skipintro') skipIntroNow();
         else if (act === 'favors') toggleFavBtn(btn);
         else if (act === 'track') seekTrack(e);
@@ -258,14 +273,32 @@ const Player = (() => {
     track.addEventListener('pointercancel', () => { scrubbing = false; state.scrubbing = false; wake(); });
     const tip = root.querySelector('.pl-tip');
     track.addEventListener('mousemove', e => {
-      if (!isFinite(video.duration) || !tip) return;
+      if (!isFinite(video.duration) || !video.duration || !tip) return;
       const rail = track.querySelector('.rail').getBoundingClientRect();
       const p = Math.min(1, Math.max(0, (e.clientX - rail.left) / rail.width));
+      const t = p * video.duration;
+      let label = fmt(t) + ' / ' + fmt(video.duration);
+      const mark = DB.getMark(state.key) || {};
+      if (mark.intro && t < mark.intro) label += ' · 片头区';
+      else if (mark.outro && t > mark.outro) label += ' · 片尾区';
+      if (state._resumeAt && Math.abs(t - state._resumeSec) < 15) label += ' · 上次看到';
       tip.style.display = 'block';
       tip.style.left = (p * 100) + '%';
-      tip.textContent = fmt(p * video.duration);
+      tip.textContent = label;
     });
     track.addEventListener('mouseleave', () => { if (tip) tip.style.display = 'none'; });
+    // 音量条:点击/拖动调节
+    const vb = root.querySelector('.vol-bar');
+    const setVol = e => {
+      if (!video) return;
+      const r = vb.getBoundingClientRect();
+      video.muted = false;
+      video.volume = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    };
+    vb.addEventListener('pointerdown', e => { vb.setPointerCapture(e.pointerId); setVol(e); });
+    vb.addEventListener('pointermove', e => { if (e.buttons) setVol(e); });
+    video.addEventListener('volumechange', updateVolUI);
+    video.addEventListener('loadedmetadata', () => { if (state) state._marksDone = false; updateBadges(); updateVolUI(); });
 
     video.addEventListener('timeupdate', onTime);
     video.addEventListener('play', updatePlayBtn);
@@ -361,6 +394,8 @@ const Player = (() => {
     state.groupIndex = gi; state.epIndex = ei;
     state._outroFired = false;
     state._stallHealed = false;
+    state._marksDone = false;
+    state._resumeAt = ''; state._resumeSec = 0;
     setTitle();
     try { applyRatio(); } catch (_e) {}
     showCenter(`<div class="spinner"></div><div class="pl-msg">正在加载: ${ep.name}</div>`);
@@ -443,6 +478,7 @@ const Player = (() => {
           }
           showCenter(`<div class="pl-msg">HLS 加载失败(${data.details})</div>`);
         });
+        hls.on(Hls.Events.LEVEL_SWITCHED, () => updateBadges());
       } else {
         video.src = url;
       }
@@ -472,6 +508,7 @@ const Player = (() => {
         const h = DB.getHist(state.key);
         if (h && h.epIndex === ei && h.position > 30 && h.duration && h.position < h.duration * 0.95) {
           startAt = h.position;
+          state._resumeAt = fmt(startAt); state._resumeSec = startAt;
           showCenter(`<div class="pl-msg">已从上次位置 ${fmt(startAt)} 继续播放</div>`);
         }
       }
@@ -486,6 +523,9 @@ const Player = (() => {
       video.play().catch(() => showCenter(`<button class="bigplay" data-act="play">▶</button>`));
       showCenter('');
       saveProgress();
+      updateBadges();
+      const rb = root.querySelector('[data-act="speed"]');
+      if (rb) rb.textContent = 'x' + (video.playbackRate || 1);
       // MSE 时间轴起点可能不在 0(如 PTS 偏移的流):currentTime 落在缓冲区外会永久停滞,跳到缓冲区起点
       if (startAt === 0) {
         const nudge = () => {
@@ -552,13 +592,109 @@ const Player = (() => {
     const p = Math.min(1, Math.max(0, (e.clientX - rail.left) / rail.width));
     video.currentTime = p * video.duration;
   }
+
+  /* ---------- 顶部 OSD 徽章:来源 / 画质 / 解码 / 续播 ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function updateBadges() {
+    if (!root || !state || !video) return;
+    const box = root.querySelector('.pl-badges');
+    if (!box) return;
+    const parts = [];
+    const g = state.groups[state.groupIndex];
+    if (g && g.name) parts.push('<span class="pb pb-src">' + esc(g.name) + '</span>');
+    /* 画质:多码率取当前档位,直连按扩展名 */
+    let q = '';
+    if (hls && hls.levels && hls.levels.length) {
+      const lv = hls.levels[hls.currentLevel] || hls.levels[hls.loadLevel];
+      if (lv) {
+        const h = lv.height || 0;
+        q = h >= 2160 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : Math.round(lv.bitrate / 1000) + 'k';
+        if (hls.autoLevelEnabled) q += '·自动';
+      }
+    } else if (isFinite(video.duration) && video.duration > 0) {
+      q = /m3u8/i.test(currentEpUrl()) ? 'HLS' : '直连';
+    }
+    if (q) parts.push('<span class="pb pb-q">' + esc(q) + '</span>');
+    /* 解码:内核 + 硬软解 */
+    const dec = state.decodeMode || DB.getConfig().decodeMode || 'hw';
+    let decTxt = '';
+    if (hls) decTxt = 'MSE·' + (dec === 'sw' ? '软解' : '硬解');
+    else if (/m3u8/i.test(currentEpUrl())) decTxt = 'HLS·原生';
+    else decTxt = 'MP4·' + (dec === 'sw' ? '软解' : '硬解');
+    parts.push('<span class="pb pb-dec">' + esc(decTxt) + '</span>');
+    if (state._resumeAt) parts.push('<span class="pb pb-resume">续播 ' + esc(state._resumeAt) + '</span>');
+    box.innerHTML = parts.join('');
+    updateQBtn();
+  }
+  /* 画质快捷键:多码率循环锁档,否则进设置面板 */
+  function cycleQuality() {
+    if (iframe || !video) return;
+    if (hls && hls.levels && hls.levels.length > 1) {
+      const n = hls.levels.length;
+      const order = [-1].concat(Array.from({ length: n }, (_, i) => i));
+      const idx = (order.indexOf(hls.autoLevelEnabled ? -1 : hls.currentLevel) + 1) % order.length;
+      hls.currentLevel = order[idx];
+      const label = order[idx] === -1 ? '自动' : (hls.levels[order[idx]].height ? hls.levels[order[idx]].height + 'P' : Math.round(hls.levels[order[idx]].bitrate / 1000) + 'kbps');
+      if (window.toast) toast('画质:' + label);
+      updateBadges();
+    } else {
+      if (window.toast) toast('单码率流,无画质切换');
+      togglePset();
+    }
+  }
+  function updateQBtn() {
+    const b = root && root.querySelector('[data-act="q"]');
+    if (!b) return;
+    if (hls && hls.levels && hls.levels.length > 1 && !hls.autoLevelEnabled) {
+      const lv = hls.levels[hls.currentLevel];
+      b.textContent = lv && lv.height ? (lv.height >= 2160 ? '4K' : lv.height + 'P') : '画质';
+    } else if (hls && hls.levels && hls.levels.length > 1) {
+      b.textContent = '自动';
+    } else {
+      b.textContent = '画质';
+    }
+  }
+  /* ---------- 进度条片头/片尾标记 ---------- */
+  function renderTrackMarks() {
+    if (!root || !video || !state) return;
+    const rail = root.querySelector('.pl-track .rail');
+    if (!rail) return;
+    rail.querySelectorAll('.pl-marker').forEach(m => m.remove());
+    if (!isFinite(video.duration) || video.duration <= 0) return;
+    const mark = DB.getMark(state.key) || {};
+    const mk = (sec, cls, label) => {
+      if (!sec || sec <= 3 || sec >= video.duration - 3) return;
+      const m = el('<span class="pl-marker ' + cls + '" title="' + label + ' ' + fmt(sec) + '"></span>');
+      m.style.left = (sec / video.duration * 100) + '%';
+      rail.appendChild(m);
+    };
+    mk(mark.intro, 'm-op', '片头');
+    mk(mark.outro, 'm-ed', '片尾');
+  }
+  /* ---------- 音量控件 ---------- */
+  function updateVolUI() {
+    if (!root || !video) return;
+    const fill = root.querySelector('.vol-bar i');
+    if (fill) fill.style.width = Math.round((video.muted ? 0 : video.volume) * 100) + '%';
+    const pct = root.querySelector('.vol-pct');
+    if (pct) pct.textContent = Math.round((video.muted ? 0 : video.volume) * 100);
+    const ic = root.querySelector('[data-act="mute"]');
+    if (ic) ic.innerHTML = (video.muted || !video.volume) ? I.volOff : I.vol;
+  }
+  /* ---------- 顶栏弹幕按钮状态 ---------- */
+  function updateDmBtn() {
+    const b = root && root.querySelector('.pl-top [data-act="dm"]');
+    if (!b) return;
+    ensureDanmaku();
+    b.classList.toggle('off', !(dm && dm.state.on));
+  }
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
   function cycleSpeed(btn) {
     if (iframe) return;
     const cur = SPEEDS.indexOf(video.playbackRate) === -1 ? 0 : SPEEDS.indexOf(video.playbackRate);
     const next = SPEEDS[(cur + 1) % SPEEDS.length];
     video.playbackRate = next;
-    btn.textContent = '倍速 x' + next;
+    btn.textContent = 'x' + next;
   }
   function toggleFs() {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -654,12 +790,12 @@ const Player = (() => {
     }));
   }
 
-  /* 快捷字幕:循环内嵌字幕轨,无轨则打开设置条 */
+  /* 快捷字幕:循环内嵌字幕轨,无轨则打开字幕抽屉 */
   function cycleSubTrack(btn) {
     const list = subTrackList();
     if (!list.length) {
-      if (window.toast) toast('无内嵌字幕,可在「更多」搜在线字幕');
-      togglePset();
+      if (window.toast) toast('无内嵌字幕,可加载外挂或搜在线字幕');
+      toggleMediaDrawer('sub');
       return;
     }
     let cur = -1;
@@ -676,10 +812,11 @@ const Player = (() => {
     if (!dm || !window.Danmaku) { if (window.toast) toast('弹幕组件未加载'); return; }
     dm.setOn(!dm.state.on);
     saveDm();
-    if (btn) btn.textContent = dm.state.on ? '弹幕·开' : '弹幕·关';
+    if (btn && btn.classList.contains('fn')) btn.textContent = dm.state.on ? '弹幕·开' : '弹幕·关';
+    updateDmBtn();
     if (window.toast) toast(dm.state.on ? '弹幕已开' : '弹幕已关');
   }
-  /* ---------- 播放设置抽屉:画质/音轨/字幕/内核/倍速/比例/片头片尾 ---------- */
+  /* ---------- 播放设置横条:画质/音轨/内核/解码/倍速/比例/缩放/遥控 ---------- */
   function togglePset() {
     const old = root.querySelector('.pl-strip');
     if (old && old.dataset.kind === 'set') { closePanels(); wake(); return; }
@@ -691,14 +828,8 @@ const Player = (() => {
 
     function render(body) {
       body.innerHTML = '';
-      /* 快捷操作:换源 / 嗅探 / 上集(低频功能收纳进二级抽屉) */
+      /* 快捷操作:上一集(字幕/弹幕/换源/选集在右侧抽屉) */
       const quick = el('<div class="ep-grid" style="margin-bottom:6px"></div>');
-      const qSrc = el('<button class="ep" data-f tabindex="-1">🔀 换源</button>');
-      qSrc.onclick = () => { closePanels(); toggleSourcePanel(); };
-      quick.appendChild(qSrc);
-      const qSniff = el('<button class="ep" data-f tabindex="-1">🔍 嗅探</button>');
-      qSniff.onclick = () => { closePanels(); toggleSniff(); };
-      quick.appendChild(qSniff);
       const qPrev = el('<button class="ep" data-f tabindex="-1">⏮ 上一集</button>');
       qPrev.onclick = () => { closePanels(); switchEp(-1); };
       quick.appendChild(qPrev);
@@ -824,201 +955,7 @@ const Player = (() => {
           if (window.toast) toast('已重挂解码器并校准时间轴');
         };
         body.appendChild(fixAv);
-        body.appendChild(el('<div class="hint">黑屏/卡顿:先试「软解兼容」;网络流建议用 EXO 内核;片头跳过在「设置」页配置。</div>'));
-      }
-
-      /* 字幕 */
-      const subList = subTrackList();
-      if (subList.length || (state.subs && state.subs.length)) {
-        body.appendChild(el('<div class="d-group">字幕</div>'));
-        const sg = el('<div class="ep-grid"></div>');
-        const offB = el('<button class="ep" data-f tabindex="-1">关闭</button>');
-        offB.onclick = function () { subList.forEach(function (t) { t.track.mode = 'hidden'; }); render(body); };
-        sg.appendChild(offB);
-        subList.forEach(function (t, i) {
-          const b = el('<button class="ep' + (t.track.mode === 'showing' ? ' current' : '') + '" data-f tabindex="-1">' + t.name + '</button>');
-          b.onclick = function () {
-            subList2 = subTrackList();
-            subList2.forEach(function (x, xi) { x.track.mode = (xi === i ? 'showing' : 'hidden'); });
-            render(body);
-          };
-          sg.appendChild(b);
-        });
-        const loadB = el('<button class="ep" data-f tabindex="-1">📂 加载字幕文件</button>');
-        loadB.onclick = function () {
-          const inp = el('<input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" style="display:none">');
-          inp.onchange = function () {
-            const f = inp.files[0];
-            if (!f) return;
-            f.arrayBuffer().then(function (buf) {
-              const text = window.Subtitles.decodeSmart(buf);
-              const cues = window.Subtitles.parse(text, f.name);
-              if (!cues.length) { if (window.toast) toast('字幕解析失败(格式不支持)'); return; }
-              let track = null;
-              for (let i = 0; i < video.textTracks.length; i++) {
-                if (video.textTracks[i].label === f.name) { track = video.textTracks[i]; break; }
-              }
-              if (!track) {
-                track = video.addTextTrack('subtitles', f.name, 'zh');
-                cues.forEach(function (c) { try { track.addCue(new VTTCue(c.start, c.end, c.text)); } catch (e) {} });
-              }
-              track.mode = 'showing';
-              if (window.toast) toast('字幕已加载:' + f.name);
-              render(body);
-            });
-          };
-          inp.click();
-        };
-        sg.appendChild(loadB);
-        body.appendChild(sg);
-        body.appendChild(el('<div class="hint">音轨切换:HLS 流的多音轨支持;纯 MP4 的内封多音轨浏览器暂不支持切换。</div>'));
-      }
-
-      /* ============ 在线字幕(SubHD) + 时间轴 Offset + 样式 ============ */
-      body.appendChild(el('<div class="d-group">在线字幕 · 时间轴 · 样式</div>'));
-      const og = el('<div class="ep-grid"></div>');
-      const onlB = el('<button class="ep" data-f tabindex="-1">🌐 在线字幕搜索</button>');
-      onlB.onclick = function () { renderOnlineSubs(body); };
-      og.appendChild(onlB);
-      const mko = function (label, d, title) {
-        const b = el('<button class="ep" data-f tabindex="-1" title="' + (title || '') + '">' + label + '</button>');
-        b.onclick = function () { shiftSubOffset(d); };
-        og.appendChild(b);
-      };
-      mko('⏱ 字幕提前0.5s', -0.5, '字幕比台词快半拍时点此');
-      mko('⏱ 字幕延迟+0.5s', 0.5, '字幕比台词慢半拍时点此');
-      mko('↺ Offset归零', 'reset', '重新加载本集恢复原始时间轴');
-      body.appendChild(og);
-
-      /* 字幕样式:字号/描边/背景 */
-      const stRow = el('<div class="ep-grid" style="margin-top:6px"></div>');
-      (function () {
-        const st = subStyle();
-        const bs = el('<button class="ep" data-f tabindex="-1">字号 ' + st.scale + 'x(点切换)</button>');
-        bs.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0.7, 1, 1.3, 1.6, 2]; s.scale = seq[(seq.indexOf(s.scale || 1) + 1) % seq.length]; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); render(body); };
-        stRow.appendChild(bs);
-        const bt = el('<button class="ep" data-f tabindex="-1">描边 ' + st.stroke + 'px(点切换)</button>');
-        bt.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0, 1, 2, 3, 4]; s.stroke = seq[(seq.indexOf(s.stroke === undefined ? 2 : s.stroke) + 1) % seq.length]; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); render(body); };
-        stRow.appendChild(bt);
-        const bg = el('<button class="ep" data-f tabindex="-1">背景 ' + Math.round(st.bg * 100) + '%(点切换)</button>');
-        bg.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0, 0.25, 0.45, 0.7]; const cur = s.bg === undefined ? 0.35 : s.bg; s.bg = seq[(seq.indexOf(cur) + 1) % seq.length] || 0; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); render(body); };
-        stRow.appendChild(bg);
-      })();
-      body.appendChild(stRow);
-      body.appendChild(el('<div class="hint">在线字幕来自 SubHD(简体/繁体/双语/特效字幕,支持 SRT/ASS);时间轴微调对当前集立即生效;样式对所有外挂字幕生效并记忆。</div>'));
-
-      /* 在线字幕搜索面板 */
-      function renderOnlineSubs(box2) {
-        box2.innerHTML = '';
-        box2.appendChild(el('<div class="d-group">在线字幕(SubHD)</div>'));
-        const epName = (state.groups[state.groupIndex].eps[state.epIndex] || {}).name || state.name || '';
-        const kw0 = epName.replace(/\.(mp4|mkv|ts|m2ts|avi|webm|flv)$/i, '').replace(/[._\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
-        const bar = el('<div class="search-bar" style="display:flex;gap:8px;margin-bottom:10px"><input class="inp" value="' + kw0.replace(/"/g, '') + '" placeholder="片名或版本关键词" style="flex:1"><button class="ep" data-f tabindex="-1">搜索</button></div>');
-        const listBox = el('<div></div>');
-        const doSearch = function () {
-          const kw = bar.querySelector('input').value.trim();
-          if (!kw) return;
-          listBox.innerHTML = UI.spinner();
-          const SRV = location.protocol === 'file:' ? 'http://127.0.0.1:9978' : '';
-          fetch(SRV + '/sub/search?kw=' + encodeURIComponent(kw)).then(r => r.json()).then(d => {
-            listBox.innerHTML = '';
-            if (d.error) { listBox.appendChild(el('<div class="hint">' + d.error + '</div>')); return; }
-            if (!d.list.length) { listBox.appendChild(el('<div class="hint">没有找到字幕,换个关键词试试(建议用片名)</div>')); return; }
-            const grid = el('<div class="ep-grid"></div>');
-            d.list.slice(0, 24).forEach(function (it) {
-              const b = el('<button class="ep" style="text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" data-f tabindex="-1" title="' + (it.lang + ' ' + it.fmt) + '">' +
-                (it.name.slice(0, 36)) + ' · ' + (it.lang || '?') + (it.fmt ? ' ' + it.fmt : '') + '</button>');
-              b.onclick = function () {
-                b.textContent = '下载中…';
-                fetch(SRV + '/sub/down?id=' + it.id).then(r => {
-                  if (!r.ok) return r.json().then(j => { throw new Error(j.error || '下载失败'); });
-                  return r.arrayBuffer();
-                }).then(buf => {
-                  const text = window.Subtitles.decodeSmart(buf);
-                  const cues = window.Subtitles.parse(text, it.name);
-                  if (!cues.length) throw new Error('字幕解析失败');
-                  attachSub(it.name.slice(0, 24), cues);
-                  render(body);
-                }).catch(e => { if (window.toast) toast('字幕下载失败:' + (e.message || e)); b.textContent = '重试 ' + it.name.slice(0, 20); });
-              };
-              grid.appendChild(b);
-            });
-            listBox.appendChild(grid);
-          }).catch(e => { listBox.innerHTML = ''; listBox.appendChild(el('<div class="hint">搜索失败:' + (e.message || e) + '</div>')); });
-        };
-        bar.querySelector('button').onclick = doSearch;
-        bar.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-        box2.appendChild(bar);
-        box2.appendChild(listBox);
-        const back = el('<button class="ep" data-f tabindex="-1">← 返回设置</button>');
-        back.onclick = function () { render(body); };
-        box2.appendChild(back);
-        KeyNav.focusFirst(box2);
-      }
-
-      /* 弹幕 */
-      ensureDanmaku();
-      if (window.Danmaku) {
-        body.appendChild(el('<div class="d-group">弹幕</div>'));
-        const dg = el('<div class="ep-grid"></div>');
-        const savedDm = JSON.parse(localStorage.getItem('tvw_danmaku') || '{"on":true,"opacity":0.85,"fontScale":1}');
-        const onB = el('<button class="ep' + (dm.state.on ? ' current' : '') + '" data-f tabindex="-1">' + (dm.state.on ? '弹幕 开' : '弹幕 关') + '</button>');
-        onB.onclick = function () { dm.setOn(!dm.state.on); saveDm(); render(body); };
-        dg.appendChild(onB);
-        /* 在线弹幕:按当前文件名从弹幕接口拉取(接口在「设置」页配置) */
-        const dmoB = el('<button class="ep" data-f tabindex="-1">🌐 在线弹幕</button>');
-        dmoB.onclick = function () {
-          dmoB.textContent = '匹配中…';
-          const epName = ((state.groups[state.groupIndex].eps[state.epIndex] || {}).name || '') + '';
-          Danmaku.fetchOnline(epName).then(function (r) {
-            if (!r.items.length) throw new Error('接口没有返回弹幕');
-            dm.setItems(r.items);
-            dm.setOn(true);
-            if (window.toast) toast('弹幕已加载:' + (r.matched || r.items.length + ' 条'));
-            render(body);
-          }).catch(function (e) {
-            dmoB.textContent = '🌐 在线弹幕(重试)';
-            if (window.toast) toast('弹幕获取失败:' + (e.message || e));
-          });
-        };
-        dg.appendChild(dmoB);
-        [[0.5, '淡'], [0.85, '标准'], [1, '浓']].forEach(function (pair) {
-          const cur = Math.abs(dm.state.opacity - pair[0]) < 0.05;
-          const b = el('<button class="ep' + (cur ? ' current' : '') + '" data-f tabindex="-1">透明 ' + pair[1] + '</button>');
-          b.onclick = function () { dm.setOpacity(pair[0]); saveDm(); render(body); };
-          dg.appendChild(b);
-        });
-        [[0.8, '小'], [1, '中'], [1.3, '大']].forEach(function (pair) {
-          const cur = Math.abs(dm.state.fontScale - pair[0]) < 0.05;
-          const b = el('<button class="ep' + (cur ? ' current' : '') + '" data-f tabindex="-1">' + pair[1] + '字</button>');
-          b.onclick = function () { dm.setFontScale(pair[0]); saveDm(); render(body); };
-          dg.appendChild(b);
-        });
-        const fileB = el('<button class="ep" data-f tabindex="-1">📂 加载弹幕文件(XML)</button>');
-        fileB.onclick = function () {
-          const inp = el('<input type="file" accept=".xml,text/xml" style="display:none">');
-          inp.onchange = function () {
-            const f = inp.files[0];
-            if (!f) return;
-            const r = new FileReader();
-            r.onload = function () {
-              try {
-                dm.setItems(window.Danmaku.parseXML(r.result));
-                const sv = JSON.parse(localStorage.getItem('tvw_danmaku') || '{}');
-                sv.text = r.result; sv.on = true;
-                localStorage.setItem('tvw_danmaku', JSON.stringify(sv));
-                dm.setOn(true);
-                if (window.toast) toast('弹幕已加载:' + f.name);
-                render(body);
-              } catch (e) { if (window.toast) toast('弹幕解析失败:' + e.message); }
-            };
-            r.readAsText(f, 'utf-8');
-          };
-          inp.click();
-        };
-        dg.appendChild(fileB);
-        body.appendChild(dg);
-        body.appendChild(el('<div class="hint">弹幕文件:B站格式 XML(弹弹play 兼容),加载后本片自动记忆</div>'));
+        body.appendChild(el('<div class="hint">黑屏/卡顿:先试「软解兼容」;网络流建议用 EXO 内核;片头跳过在「选集」抽屉底部标记。</div>'));
       }
 
       body.appendChild(el('<div class="d-group">倍速</div>'));
@@ -1049,31 +986,6 @@ const Player = (() => {
         zg.appendChild(b);
       });
       body.appendChild(zg);
-
-      const mark = DB.getMark(state.key) || {};
-      body.appendChild(el('<div class="d-group">片头片尾(自动跳过)</div>'));
-      const ig = el('<div class="ep-grid"></div>');
-      const mI = el('<button class="ep" data-f tabindex="-1">' + (mark.intro ? '★ 片头 ' + fmt(mark.intro) : '标记当前位置为片头') + '</button>');
-      mI.onclick = function () {
-        if (video && video.currentTime > 5) {
-          DB.setMark(state.key, { intro: Math.floor(video.currentTime) });
-          if (window.toast) toast('已标记片头 ' + fmt(video.currentTime));
-          render(body);
-        }
-      };
-      const mO = el('<button class="ep" data-f tabindex="-1">' + (mark.outro ? '★ 片尾 ' + fmt(mark.outro) : '标记当前位置为片尾') + '</button>');
-      mO.onclick = function () {
-        if (video && isFinite(video.duration) && video.currentTime < video.duration - 20) {
-          DB.setMark(state.key, { outro: Math.floor(video.currentTime) });
-          if (window.toast) toast('已标记片尾,此后自动播下一集');
-          render(body);
-        }
-      };
-      const clr = el('<button class="ep' + (!mark.intro && !mark.outro ? ' watched' : '') + '" data-f tabindex="-1">清除本片标记</button>');
-      clr.onclick = function () { DB.clearMark(state.key, 'intro'); DB.clearMark(state.key, 'outro'); if (window.toast) toast('已清除'); render(body); };
-      ig.appendChild(mI); ig.appendChild(mO); ig.appendChild(clr);
-      body.appendChild(ig);
-      body.appendChild(el('<div class="hint">默认自动跳过片头:' + (DB.getConfig().skipIntroAuto ? (DB.getConfig().defaultIntroSec + '秒') : '关闭') + '(全局默认在「设置」页调整)</div>'));
     }
 
     render(body);
@@ -1120,57 +1032,318 @@ const Player = (() => {
     KeyNav.setModal(false);
   }
 
-  /* ---------- 选集(横排) ---------- */
-  function toggleDrawer() {
-    const old = root.querySelector('.pl-strip');
-    if (old && old.dataset.kind === 'eps') { closePanels(); wake(); return; }
+  /* ---------- 右侧媒体抽屉:选集 / 换源 / 字幕 / 弹幕 四 Tab ---------- */
+  function toggleDrawer() { toggleMediaDrawer('eps'); }
+  function toggleSourcePanel() {
+    if (!state.onFindSources || !state.onPlayFromSource) { toast && toast('该播放内容不支持换源'); return; }
+    toggleMediaDrawer('src');
+  }
+  function toggleMediaDrawer(tab) {
+    const old = root.querySelector('.pl-drawer');
+    if (old && old.dataset.kind === 'media' && old.dataset.tab === tab) { closePanels(); wake(); return; }
     closePanels(); wake();
-    const d = el(`<div class="pl-strip" data-kind="eps"><div class="d-body"></div></div>`);
+    const d = el(`<div class="pl-drawer" data-kind="media" data-tab="${tab}">
+      <div class="d-head"></div>
+      <div class="pl-tabs">
+        <button class="pl-tab" data-t="eps" data-f tabindex="-1">选集</button>
+        <button class="pl-tab" data-t="src" data-f tabindex="-1">换源</button>
+        <button class="pl-tab" data-t="sub" data-f tabindex="-1">字幕</button>
+        <button class="pl-tab" data-t="dm" data-f tabindex="-1">弹幕</button>
+      </div>
+      <div class="d-body"></div>
+    </div>`);
+    root.appendChild(d);
+    d.querySelectorAll('.pl-tab').forEach(t => {
+      t.onclick = () => { if (d.dataset.tab !== t.dataset.t) { d.dataset.tab = t.dataset.t; renderMediaTab(d); } };
+    });
+    renderMediaTab(d);
+    KeyNav.setModal(true);
+    wake();
+    KeyNav.focusFirst(d);
+  }
+  function renderMediaTab(d) {
+    const tab = d.dataset.tab;
+    d.querySelectorAll('.pl-tab').forEach(t => t.classList.toggle('current', t.dataset.t === tab));
     const body = d.querySelector('.d-body');
+    body.innerHTML = '';
+    if (tab === 'eps') renderEpsTab(d, body);
+    else if (tab === 'src') renderSrcTab(d, body);
+    else if (tab === 'sub') renderSubTab(d, body);
+    else renderDmTab(d, body);
+  }
+
+  /* --- Tab:选集(含片头片尾标记) --- */
+  function renderEpsTab(d, body) {
+    const g0 = state.groups[state.groupIndex];
+    d.querySelector('.d-head').textContent = (state.title || state.name || '') + (g0 && g0.eps[state.epIndex] ? ' · ' + g0.eps[state.epIndex].name : '');
     state.groups.forEach((g, gi) => {
       const gh = el(`<div class="d-group">${g.name}</div>`);
       body.appendChild(gh);
+      const grid = el('<div class="ep-grid"></div>');
       g.eps.forEach((ep, ei) => {
         const b = el(`<button class="ep" data-f tabindex="-1">${ep.name}</button>`);
         if (gi === state.groupIndex && ei === state.epIndex) b.classList.add('current');
         b.onclick = () => { closePanels(); loadEpisode(gi, ei); };
-        body.appendChild(b);
+        grid.appendChild(b);
       });
+      body.appendChild(grid);
     });
-    root.appendChild(d);
-    KeyNav.setModal(true);
-    wake();
-    const cur = d.querySelector('.ep.current');
-    if (cur) { cur.focus(); cur.scrollIntoView({ inline: 'center', block: 'nearest' }); }
+    /* 片头片尾标记(标记后进度条上出现定位点并自动跳过) */
+    body.appendChild(el('<div class="d-group">片头片尾(自动跳过)</div>'));
+    const mark = DB.getMark(state.key) || {};
+    const ig = el('<div class="ep-grid"></div>');
+    const mI = el('<button class="ep" data-f tabindex="-1">' + (mark.intro ? '★ 片头 ' + fmt(mark.intro) : '标记当前位置为片头') + '</button>');
+    mI.onclick = function () {
+      if (video && video.currentTime > 5) {
+        DB.setMark(state.key, { intro: Math.floor(video.currentTime) });
+        if (window.toast) toast('已标记片头 ' + fmt(video.currentTime));
+        renderTrackMarks();
+        renderMediaTab(d);
+      }
+    };
+    const mO = el('<button class="ep" data-f tabindex="-1">' + (mark.outro ? '★ 片尾 ' + fmt(mark.outro) : '标记当前位置为片尾') + '</button>');
+    mO.onclick = function () {
+      if (video && isFinite(video.duration) && video.currentTime < video.duration - 20) {
+        DB.setMark(state.key, { outro: Math.floor(video.currentTime) });
+        if (window.toast) toast('已标记片尾,此后自动播下一集');
+        renderTrackMarks();
+        renderMediaTab(d);
+      }
+    };
+    const clr = el('<button class="ep' + (!mark.intro && !mark.outro ? ' watched' : '') + '" data-f tabindex="-1">清除本片标记</button>');
+    clr.onclick = function () { DB.clearMark(state.key, 'intro'); DB.clearMark(state.key, 'outro'); renderTrackMarks(); if (window.toast) toast('已清除'); renderMediaTab(d); };
+    ig.appendChild(mI); ig.appendChild(mO); ig.appendChild(clr);
+    body.appendChild(ig);
+    body.appendChild(el('<div class="hint">默认自动跳过片头:' + (DB.getConfig().skipIntroAuto ? (DB.getConfig().defaultIntroSec + '秒') : '关闭') + '(全局默认在「设置」页调整)</div>'));
   }
 
-  /* ---------- 换源面板 ---------- */
-  function toggleSourcePanel() {
-    if (!state.onFindSources || !state.onPlayFromSource) { toast && toast('该播放内容不支持换源'); return; }
-    const old = root.querySelector('.pl-strip');
-    if (old && old.dataset.kind === 'src') { closePanels(); wake(); return; }
-    closePanels(); wake();
-    const d = el(`<div class="pl-strip" data-kind="src"><div class="d-body">${UI.spinner()}</div></div>`);
-    root.appendChild(d);
-    KeyNav.setModal(true);
+  /* --- Tab:换源 --- */
+  function renderSrcTab(d, body) {
+    d.querySelector('.d-head').textContent = '换源 · 同名影片';
+    body.innerHTML = UI.spinner();
     state.onFindSources().then(list => {
-      const body = d.querySelector('.d-body');
       if (!document.body.contains(d)) return;
+      const b2 = d.querySelector('.d-body');
+      b2.innerHTML = '';
+      /* 自动换源开关(失败/卡顿15秒自动切换) */
+      const auto = DB.getConfig().autoSwitch;
+      const autoRow = el('<button class="ep wide' + (auto ? ' current' : '') + '" data-f tabindex="-1">' + (auto ? '自动换源 开 · 失败/卡顿15秒自动切换' : '自动换源 关') + '</button>');
+      autoRow.onclick = () => { DB.setConfig({ autoSwitch: !DB.getConfig().autoSwitch }); if (window.toast) toast(!DB.getConfig().autoSwitch ? '已开启自动换源' : '已关闭自动换源'); renderMediaTab(d); };
+      b2.appendChild(autoRow);
+      b2.appendChild(el('<div class="d-group">' + (list && list.length ? list.length + ' 个源命中 · 按测速排序' : '') + '</div>'));
       if (!list || !list.length) {
-        body.innerHTML = '<div class="d-group">其他源暂无同名影片,可尝试搜索页全网搜索</div>';
+        b2.appendChild(el('<div class="hint">其他源暂无同名影片,可尝试搜索页全网搜索</div>'));
+        KeyNav.focusFirst(b2);
         return;
       }
-      body.innerHTML = '';
-      const closeChip = el('<button class="ep" data-f tabindex="-1" title="关闭">✕</button>');
-      closeChip.onclick = () => { closePanels(); wake(); };
-      body.appendChild(closeChip);
+      const grid = el('<div class="ep-grid"></div>');
       list.forEach(it => {
-        const b = el(`<button class="ep${it.srcId === state.sourceId ? ' current' : ''}" data-f tabindex="-1">${it.srcName} · ${it.remarks || '直链'} · ${it.ms}ms</button>`);
+        const b = el(`<button class="ep${it.srcId === state.sourceId ? ' current' : ''}" data-f tabindex="-1" title="${it.srcName} · ${it.remarks || '直链'} · ${it.ms}ms">${it.srcName} · ${it.remarks || '直链'} · ${it.ms}ms</button>`);
         b.onclick = () => { closePanels(); state.onPlayFromSource(it, state.epIndex); };
-        body.appendChild(b);
+        grid.appendChild(b);
       });
-      KeyNav.focusFirst(d);
+      b2.appendChild(grid);
+      KeyNav.focusFirst(b2);
+    }).catch(() => { if (document.body.contains(d)) d.querySelector('.d-body').innerHTML = '<div class="hint">测源失败,请稍后重试</div>'; });
+  }
+
+  /* --- Tab:字幕(轨道/外挂/在线/时间轴/样式) --- */
+  function renderSubTab(d, body) {
+    d.querySelector('.d-head').textContent = '字幕';
+    const subList = subTrackList();
+    if (subList.length) {
+      body.appendChild(el('<div class="d-group">内嵌字幕轨</div>'));
+      const grid = el('<div class="ep-grid"></div>');
+      const offB = el('<button class="ep" data-f tabindex="-1">关闭</button>');
+      offB.onclick = function () { subList.forEach(function (t) { t.track.mode = 'hidden'; }); renderMediaTab(d); };
+      grid.appendChild(offB);
+      subList.forEach(function (t, i) {
+        const b = el('<button class="ep' + (t.track.mode === 'showing' ? ' current' : '') + '" data-f tabindex="-1">' + t.name + '</button>');
+        b.onclick = function () {
+          subTrackList().forEach(function (x, xi) { x.track.mode = (xi === i ? 'showing' : 'hidden'); });
+          renderMediaTab(d);
+        };
+        grid.appendChild(b);
+      });
+      body.appendChild(grid);
+    }
+    body.appendChild(el('<div class="d-group">外挂与在线</div>'));
+    const sg = el('<div class="ep-grid"></div>');
+    const loadB = el('<button class="ep" data-f tabindex="-1">📂 加载字幕文件</button>');
+    loadB.onclick = function () {
+      const inp = el('<input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" style="display:none">');
+      inp.onchange = function () {
+        const f = inp.files[0];
+        if (!f) return;
+        f.arrayBuffer().then(function (buf) {
+          const text = window.Subtitles.decodeSmart(buf);
+          const cues = window.Subtitles.parse(text, f.name);
+          if (!cues.length) { if (window.toast) toast('字幕解析失败(格式不支持)'); return; }
+          let track = null;
+          for (let i = 0; i < video.textTracks.length; i++) {
+            if (video.textTracks[i].label === f.name) { track = video.textTracks[i]; break; }
+          }
+          if (!track) {
+            track = video.addTextTrack('subtitles', f.name, 'zh');
+            cues.forEach(function (c) { try { track.addCue(new VTTCue(c.start, c.end, c.text)); } catch (e) {} });
+          }
+          track.mode = 'showing';
+          if (window.toast) toast('字幕已加载:' + f.name);
+          renderMediaTab(d);
+        });
+      };
+      inp.click();
+    };
+    sg.appendChild(loadB);
+    const onlB = el('<button class="ep" data-f tabindex="-1">🌐 SubHD 在线搜索</button>');
+    onlB.onclick = function () { renderOnlineSubs(d); };
+    sg.appendChild(onlB);
+    body.appendChild(sg);
+
+    body.appendChild(el('<div class="d-group">时间轴</div>'));
+    const og = el('<div class="ep-grid"></div>');
+    const mko = function (label, delta, title) {
+      const b = el('<button class="ep" data-f tabindex="-1" title="' + (title || '') + '">' + label + '</button>');
+      b.onclick = function () { shiftSubOffset(delta); };
+      og.appendChild(b);
+    };
+    mko('⏱ 提前0.5s', -0.5, '字幕比台词快半拍时点此');
+    mko('⏱ 延迟+0.5s', 0.5, '字幕比台词慢半拍时点此');
+    mko('↺ Offset归零', 'reset', '重新加载本集恢复原始时间轴');
+    body.appendChild(og);
+
+    body.appendChild(el('<div class="d-group">字幕样式</div>'));
+    const stRow = el('<div class="ep-grid"></div>');
+    (function () {
+      const st = subStyle();
+      const bs = el('<button class="ep" data-f tabindex="-1">字号 ' + st.scale + 'x(点切换)</button>');
+      bs.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0.7, 1, 1.3, 1.6, 2]; s.scale = seq[(seq.indexOf(s.scale || 1) + 1) % seq.length]; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); renderMediaTab(d); };
+      stRow.appendChild(bs);
+      const bt = el('<button class="ep" data-f tabindex="-1">描边 ' + st.stroke + 'px(点切换)</button>');
+      bt.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0, 1, 2, 3, 4]; s.stroke = seq[(seq.indexOf(s.stroke === undefined ? 2 : s.stroke) + 1) % seq.length]; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); renderMediaTab(d); };
+      stRow.appendChild(bt);
+      const bg = el('<button class="ep" data-f tabindex="-1">背景 ' + Math.round(st.bg * 100) + '%(点切换)</button>');
+      bg.onclick = function () { const s = DB.getConfig().subStyle || {}; const seq = [0, 0.25, 0.45, 0.7]; const cur = s.bg === undefined ? 0.35 : s.bg; s.bg = seq[(seq.indexOf(cur) + 1) % seq.length] || 0; DB.setConfig({ subStyle: s }); enableSubOverlay(); applySubStyle(); renderMediaTab(d); };
+      stRow.appendChild(bg);
+    })();
+    body.appendChild(stRow);
+    body.appendChild(el('<div class="hint">在线字幕来自 SubHD(支持 SRT/ASS);时间轴微调对当前集立即生效;样式记忆后对所有外挂字幕生效。</div>'));
+  }
+  /* 在线字幕搜索(SubHD),返回按钮回到字幕 Tab */
+  function renderOnlineSubs(d) {
+    const box2 = d.querySelector('.d-body');
+    box2.innerHTML = '';
+    d.querySelector('.d-head').textContent = '在线字幕(SubHD)';
+    const epName = (state.groups[state.groupIndex].eps[state.epIndex] || {}).name || state.name || '';
+    const kw0 = epName.replace(/\.(mp4|mkv|ts|m2ts|avi|webm|flv)$/i, '').replace(/[._\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const bar = el('<div class="search-bar" style="display:flex;gap:8px;margin-bottom:10px"><input class="inp" value="' + kw0.replace(/"/g, '') + '" placeholder="片名或版本关键词" style="flex:1"><button class="ep" data-f tabindex="-1">搜索</button></div>');
+    const listBox = el('<div></div>');
+    const doSearch = function () {
+      const kw = bar.querySelector('input').value.trim();
+      if (!kw) return;
+      listBox.innerHTML = UI.spinner();
+      const SRV = location.protocol === 'file:' ? 'http://127.0.0.1:9978' : '';
+      fetch(SRV + '/sub/search?kw=' + encodeURIComponent(kw)).then(r => r.json()).then(dd => {
+        listBox.innerHTML = '';
+        if (dd.error) { listBox.appendChild(el('<div class="hint">' + dd.error + '</div>')); return; }
+        if (!dd.list.length) { listBox.appendChild(el('<div class="hint">没有找到字幕,换个关键词试试(建议用片名)</div>')); return; }
+        const grid = el('<div class="ep-grid"></div>');
+        dd.list.slice(0, 24).forEach(function (it) {
+          const b = el('<button class="ep" style="text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" data-f tabindex="-1" title="' + (it.lang + ' ' + it.fmt) + '">' +
+            (it.name.slice(0, 36)) + ' · ' + (it.lang || '?') + (it.fmt ? ' ' + it.fmt : '') + '</button>');
+          b.onclick = function () {
+            b.textContent = '下载中…';
+            fetch(SRV + '/sub/down?id=' + it.id).then(r => {
+              if (!r.ok) return r.json().then(j => { throw new Error(j.error || '下载失败'); });
+              return r.arrayBuffer();
+            }).then(buf => {
+              const text = window.Subtitles.decodeSmart(buf);
+              const cues = window.Subtitles.parse(text, it.name);
+              if (!cues.length) throw new Error('字幕解析失败');
+              attachSub(it.name.slice(0, 24), cues);
+              renderMediaTab(d);
+            }).catch(e => { if (window.toast) toast('字幕下载失败:' + (e.message || e)); b.textContent = '重试 ' + it.name.slice(0, 20); });
+          };
+          grid.appendChild(b);
+        });
+        listBox.appendChild(grid);
+      }).catch(e => { listBox.innerHTML = ''; listBox.appendChild(el('<div class="hint">搜索失败:' + (e.message || e) + '</div>')); });
+    };
+    bar.querySelector('button').onclick = doSearch;
+    bar.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+    box2.appendChild(bar);
+    box2.appendChild(listBox);
+    const back = el('<button class="ep" data-f tabindex="-1">← 返回字幕</button>');
+    back.onclick = function () { renderMediaTab(d); };
+    box2.appendChild(back);
+    KeyNav.focusFirst(box2);
+  }
+
+  /* --- Tab:弹幕(开关/在线/透明度/字号/文件) --- */
+  function renderDmTab(d, body) {
+    d.querySelector('.d-head').textContent = '弹幕';
+    ensureDanmaku();
+    if (!window.Danmaku || !dm) { body.innerHTML = '<div class="hint">弹幕组件未加载</div>'; return; }
+    const dg = el('<div class="ep-grid"></div>');
+    const onB = el('<button class="ep' + (dm.state.on ? ' current' : '') + '" data-f tabindex="-1">' + (dm.state.on ? '弹幕 开' : '弹幕 关') + '</button>');
+    onB.onclick = function () { dm.setOn(!dm.state.on); saveDm(); updateDmBtn(); renderMediaTab(d); };
+    dg.appendChild(onB);
+    /* 在线弹幕:按当前文件名从弹幕接口拉取(接口在「设置」页配置) */
+    const dmoB = el('<button class="ep" data-f tabindex="-1">🌐 在线弹幕</button>');
+    dmoB.onclick = function () {
+      dmoB.textContent = '匹配中…';
+      const epName = ((state.groups[state.groupIndex].eps[state.epIndex] || {}).name || '') + '';
+      Danmaku.fetchOnline(epName).then(function (r) {
+        if (!r.items.length) throw new Error('接口没有返回弹幕');
+        dm.setItems(r.items);
+        dm.setOn(true);
+        updateDmBtn();
+        if (window.toast) toast('弹幕已加载:' + (r.matched || r.items.length + ' 条'));
+        renderMediaTab(d);
+      }).catch(function (e) {
+        dmoB.textContent = '🌐 在线弹幕(重试)';
+        if (window.toast) toast('弹幕获取失败:' + (e.message || e));
+      });
+    };
+    dg.appendChild(dmoB);
+    [[0.5, '淡'], [0.85, '标准'], [1, '浓']].forEach(function (pair) {
+      const cur = Math.abs(dm.state.opacity - pair[0]) < 0.05;
+      const b = el('<button class="ep' + (cur ? ' current' : '') + '" data-f tabindex="-1">透明 ' + pair[1] + '</button>');
+      b.onclick = function () { dm.setOpacity(pair[0]); saveDm(); renderMediaTab(d); };
+      dg.appendChild(b);
     });
+    [[0.8, '小'], [1, '中'], [1.3, '大']].forEach(function (pair) {
+      const cur = Math.abs(dm.state.fontScale - pair[0]) < 0.05;
+      const b = el('<button class="ep' + (cur ? ' current' : '') + '" data-f tabindex="-1">' + pair[1] + '字</button>');
+      b.onclick = function () { dm.setFontScale(pair[0]); saveDm(); renderMediaTab(d); };
+      dg.appendChild(b);
+    });
+    const fileB = el('<button class="ep" data-f tabindex="-1">📂 加载弹幕文件(XML)</button>');
+    fileB.onclick = function () {
+      const inp = el('<input type="file" accept=".xml,text/xml" style="display:none">');
+      inp.onchange = function () {
+        const f = inp.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = function () {
+          try {
+            dm.setItems(window.Danmaku.parseXML(r.result));
+            const sv = JSON.parse(localStorage.getItem('tvw_danmaku') || '{}');
+            sv.text = r.result; sv.on = true;
+            localStorage.setItem('tvw_danmaku', JSON.stringify(sv));
+            dm.setOn(true);
+            updateDmBtn();
+            if (window.toast) toast('弹幕已加载:' + f.name);
+            renderMediaTab(d);
+          } catch (e) { if (window.toast) toast('弹幕解析失败:' + e.message); }
+        };
+        r.readAsText(f, 'utf-8');
+      };
+      inp.click();
+    };
+    dg.appendChild(fileB);
+    body.appendChild(dg);
+    body.appendChild(el('<div class="hint">弹幕文件:B站格式 XML(弹弹play 兼容),加载后本片自动记忆</div>'));
   }
 
   /* ---------- 失败自动换源(返回 true 表示已接管) ---------- */
@@ -1286,6 +1459,8 @@ const Player = (() => {
     root.querySelector('#pl-dur').textContent = fmt(video.duration);
     if (isFinite(video.duration) && video.duration > 0) {
       root.querySelector('.pl-track .fill').style.width = (video.currentTime / video.duration * 100) + '%';
+      /* 时长就绪后渲染一次片头/片尾标记 */
+      if (!state._marksDone) { state._marksDone = true; renderTrackMarks(); }
       try {
         if (video.buffered.length) {
           const end = video.buffered.end(video.buffered.length - 1);
@@ -1341,6 +1516,7 @@ const Player = (() => {
     else if (k === 'f' || k === 'F') toggleFs();
     else if (k === 'e' || k === 'E') toggleDrawer();
     else if (k === 's' || k === 'S') toggleSourcePanel();
+    else if (k === 'v' || k === 'V') toggleSniff();
     else if (k === 'n' || k === 'N') switchEp(1);
   }
 

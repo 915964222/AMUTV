@@ -274,8 +274,8 @@ const API = (() => {
     } catch { return false; }
   }
 
-  /* 并发池:全网搜索所有源 */
-  async function searchAll(wd) {
+  /* 并发池:全网搜索所有源(onProgress(res, done, total) 每源完成即回调) */
+  async function searchAll(wd, onProgress) {
     const srcs = DB.getSources();
     const pool = Math.min(Math.max(1, Number(DB.getConfig().multiSearch) || 6), 12);
     const results = [];
@@ -287,9 +287,13 @@ const API = (() => {
         try {
           const r = await realAdapter(src).search(src, wd);
           const ms = Math.round(performance.now() - t0);
-          results.push({ srcId: src.id, srcName: src.name, list: r.list, ms, error: null });
+          const res = { srcId: src.id, srcName: src.name, list: r.list, ms, error: null };
+          results.push(res);
+          if (onProgress) { try { onProgress(res, results.length, srcs.length); } catch (_e) {} }
         } catch (e) {
-          results.push({ srcId: src.id, srcName: src.name, list: [], ms: Math.round(performance.now() - t0), error: (e && e.message) || '请求失败' });
+          const res = { srcId: src.id, srcName: src.name, list: [], ms: Math.round(performance.now() - t0), error: (e && e.message) || '请求失败' };
+          results.push(res);
+          if (onProgress) { try { onProgress(res, results.length, srcs.length); } catch (_e) {} }
         }
       }
     };
@@ -306,7 +310,7 @@ const API = (() => {
 
   /* 拼音首字母全源搜索:纯字母关键词时,CMS服务端搜不中中文片名,
      改为并发拉取各源首页+主要分类第一页,本地按拼音首字母/全拼过滤 */
-  async function searchPinyinAll(wd) {
+  async function searchPinyinAll(wd, onProgress) {
     const srcs = DB.getSources().filter(s => s.api);
     const pool = Math.min(Math.max(1, Number(DB.getConfig().multiSearch) || 6), 12);
     const results = [];
@@ -330,9 +334,13 @@ const API = (() => {
               try { const r = await realAdapter(src).category(src, c.type_id, pg); r.list.forEach(push); } catch (e) { break; }
             }
           }));
-          results.push({ srcId: src.id, srcName: src.name, list: hits, ms: Math.round(performance.now() - t0), error: null });
+          const res = { srcId: src.id, srcName: src.name, list: hits, ms: Math.round(performance.now() - t0), error: null };
+          results.push(res);
+          if (onProgress) { try { onProgress(res, results.length, srcs.length); } catch (_e) {} }
         } catch (e) {
-          results.push({ srcId: src.id, srcName: src.name, list: [], ms: Math.round(performance.now() - t0), error: (e && e.message) || '请求失败' });
+          const res = { srcId: src.id, srcName: src.name, list: [], ms: Math.round(performance.now() - t0), error: (e && e.message) || '请求失败' };
+          results.push(res);
+          if (onProgress) { try { onProgress(res, results.length, srcs.length); } catch (_e) {} }
         }
       }
     };

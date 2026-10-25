@@ -184,15 +184,17 @@ const App = (() => {
     return picks.slice(0, 6);
   }
 
-  /* Hero 大图轮播(海报做模糊背景+渐变遮罩,6秒自动轮播,悬停/聚焦暂停) */
+  /* Hero 大图轮播(海报做模糊背景+右侧清晰海报+渐变遮罩,6秒自动轮播,悬停/聚焦暂停) */
   function buildHero(src, items) {
     const hero = UI.el(`<div class="hero" id="hero">
       <div class="hero-bg"><img alt=""></div>
+      <img class="bg-poster" alt="">
       <div class="hero-shade"></div>
       <div class="hero-info"></div>
       <div class="hero-dots"></div>
     </div>`);
     const bgImg = hero.querySelector('.hero-bg img');
+    const posImg = hero.querySelector('.bg-poster');
     const info = hero.querySelector('.hero-info');
     const dots = hero.querySelector('.hero-dots');
     let idx = 0, timer = null, paused = false;
@@ -218,6 +220,9 @@ const App = (() => {
       bgImg.onerror = () => { bgImg.style.display = 'none'; };
       bgImg.style.display = '';
       bgImg.src = it.pic || window.IMG_FB;
+      posImg.onerror = () => { posImg.style.display = 'none'; };
+      posImg.style.display = '';
+      posImg.src = bgImg.src;
       const meta = [it.year, it.area, it.remarks].filter(Boolean).map(esc).join('<i class="hdot-sep">·</i>');
       info.innerHTML = `
         <div class="hero-kicker">精选推荐</div>
@@ -270,30 +275,58 @@ const App = (() => {
     return sec;
   }
 
-  /* 分类内容行:标题+「更多」+ 横向海报行(数据懒加载,失败/空则整行移除) */
+  /* 分类内容行:标题+「更多」+ 横向海报行(滚动到可视才加载,队列限并发,超时自动撤行) */
+  const rowQueue = [];
+  let rowActive = 0;
+  function rowEnqueue(job) {
+    rowQueue.push(job);
+    const pump = () => {
+      while (rowActive < 2 && rowQueue.length) { rowActive++; rowQueue.shift()().finally(() => { rowActive--; pump(); }); }
+    };
+    pump();
+  }
+
   function buildCatRow(src, cat) {
+    const skel = Array.from({ length: 8 }, () =>
+      '<div class="skel-card"><div class="skel-poster shimmer"></div><div class="skel-line shimmer"></div></div>').join('');
     const sec = UI.el(`<section class="row-h">
       <div class="row-head-row">
         <div class="row-head">${esc(cat.label)}</div>
         <button class="more-link" data-f tabindex="-1">更多 ›</button>
       </div>
-      <div class="hscroll poster-scroll cat-loading">${UI.spinner()}</div>
+      <div class="hscroll poster-scroll cat-loading">${skel}</div>
     </section>`);
     sec.querySelector('.more-link').onclick = () => pageCategory(cat.type_id, cat.type_name, 1);
     const grid = sec.querySelector('.hscroll');
-    (async () => {
-      let data;
-      try {
-        const key = src.id + '|' + cat.type_id + '|1';
-        if (!catCache.has(key)) catCache.set(key, await API.category(src, cat.type_id, 1));
-        data = catCache.get(key);
-      } catch (_e) { sec.remove(); return; }
-      if (!view().contains(sec)) return;
-      if (!data.list.length) { sec.remove(); return; }
-      grid.classList.remove('cat-loading');
-      grid.innerHTML = '';
-      data.list.slice(0, 20).forEach(it => grid.appendChild(UI.card(it)));
-    })();
+    const load = () => rowEnqueue(() => new Promise(resolve => {
+      (async () => {
+        let data = null;
+        try {
+          const key = src.id + '|' + cat.type_id + '|1';
+          if (catCache.has(key)) data = catCache.get(key);
+          else {
+            /* 20秒超时:超时按失败处理,不写缓存 */
+            data = await Promise.race([
+              API.category(src, cat.type_id, 1),
+              new Promise(res => setTimeout(() => res(null), 20000)),
+            ]);
+            if (data) catCache.set(key, data);
+          }
+        } catch (_e) {}
+        if (!view().contains(sec)) return resolve();
+        if (!data || !data.list.length) { sec.remove(); return resolve(); }
+        grid.classList.remove('cat-loading');
+        grid.innerHTML = '';
+        data.list.slice(0, 20).forEach(it => grid.appendChild(UI.card(it)));
+        resolve();
+      })();
+    }));
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(entries => {
+        if (entries.some(en => en.isIntersecting)) { io.disconnect(); load(); }
+      }, { rootMargin: '300px' });
+      io.observe(sec);
+    } else load();
     return sec;
   }
 
@@ -620,21 +653,82 @@ const App = (() => {
 
   /* ============ 搜索页 ============ */
   let searchMode = 'all';   // 'cur' | 'all'
-  let searchSort = 'speed'; // 'speed' | 'quality'
+  let searchSort = 'all';   // 'all' 综合 | 'speed' 速度优先 | 'quality' 清晰度优先
+  const SEARCH_HIST_KEY = 'tvw_search_hist';
+  function getSearchHist() { try { return JSON.parse(localStorage.getItem(SEARCH_HIST_KEY) || '[]'); } catch (e) { return []; } }
+  function saveSearchWord(wd) {
+    let list = getSearchHist().filter(x => x !== wd);
+    list.unshift(wd);
+    localStorage.setItem(SEARCH_HIST_KEY, JSON.stringify(list.slice(0, 8)));
+  }
+  const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  /* 标题关键词高亮 */
+  function hlName(name, wd) {
+    const e = escHtml(name);
+    if (!wd || /^[a-zA-Z]{2,}$/.test(wd)) return e;
+    return e.split(escHtml(wd)).join('<em class="kw-hl">' + escHtml(wd) + '</em>');
+  }
+  /* 备注中的画质词 → 角标;其余备注(更新至xx集)走海报底部叠加 */
+  function qualityBadge(remarks) {
+    const r = String(remarks || '');
+    if (/蓝光|4K|2160/i.test(r)) return { txt: '4K', cls: 'q4k' };
+    if (/1080/i.test(r)) return { txt: '1080P', cls: 'qhd' };
+    if (/720/i.test(r)) return { txt: '720P', cls: 'qhd' };
+    if (/超清|高清/i.test(r)) return { txt: '超清', cls: 'qhd' };
+    return null;
+  }
+  function typeName(it) {
+    const n = String(it.type_name || '');
+    if (/电影/.test(n)) return '电影';
+    if (/剧|连续|电视/.test(n)) return '剧集';
+    if (/动漫|动画/.test(n)) return '动漫';
+    if (/综艺|娱乐|真人/.test(n)) return '综艺';
+    return '其他';
+  }
+  /* 搜索结果统一卡片:画质角标 + 多源标 + 底部备注叠加 + 最快源行 */
+  function searchCard(m, wd) {
+    const c = UI.el(`<div class="card" data-f tabindex="-1">
+      <div class="poster">
+        <img loading="lazy" src="${m.it.pic || window.IMG_FB}" ${IMG_ERR}>
+        ${m.badge ? `<div class="qbadge ${m.badge.cls}">${m.badge.txt}</div>` : ''}
+        ${m.count > 1 ? `<div class="multi"> ${m.count}源可播</div>` : ''}
+        ${m.cont ? `<div class="cont">${escHtml(m.cont)}</div>` : ''}
+      </div>
+      <div class="title">${hlName(m.it.name, wd)}</div>
+      <div class="sub-row">${m.srcName ? `<span class="fast">● ${escHtml(m.srcName)} ${m.bestMs}ms</span>` : ''}<span class="frm">${escHtml(m.frm || '')}</span></div>
+    </div>`);
+    c.onclick = () => goDetail(m.it);
+    return c;
+  }
+
   function pageSearch() {
     view().innerHTML = `
       <div class="page-title">搜索 <span class="sub">支持拼音/拼音首字母(如 dxt → 大雄兔)</span></div>
+      <div class="search-hero">
+        <button class="sr-back" data-f tabindex="-1" title="返回首页">←</button>
+        <div class="sr-boxwrap">
+          <div class="sr-box" id="sr-box">
+            <span class="sr-glass">🔍</span>
+            <input id="kw" data-f tabindex="-1" placeholder="搜片名 / 拼音首字母(如 dxt)" autocomplete="off" />
+            <span class="sr-py" id="sr-py" style="display:none">拼音模式</span>
+            <button class="sr-clear" id="kw-clear" data-f tabindex="-1" title="清空" style="display:none">✕</button>
+            <button class="sr-go" id="do-search" data-f tabindex="-1">搜索</button>
+          </div>
+          <div class="sr-sug" id="sr-sug" style="display:none"></div>
+        </div>
+      </div>
+      <div class="sr-chiprows">
+        <div class="sr-chiprow" id="sr-hist"><span class="cr-h">搜索历史</span></div>
+        <div class="sr-chiprow" id="sr-hot"><span class="cr-h">热搜榜</span><span class="cr-h" style="font-weight:400">加载中…</span></div>
+      </div>
       <div class="cat-row" id="search-mode">
         <button class="cat${searchMode === 'all' ? ' active' : ''}" data-mode="all" data-f tabindex="-1">🌐 全源聚合</button>
         <button class="cat${searchMode === 'cur' ? ' active' : ''}" data-mode="cur" data-f tabindex="-1">📡 当前源</button>
-        <button class="cat${searchSort === 'speed' ? ' active' : ''}" data-sort="speed" data-f tabindex="-1" title="按解析速度排序">⚡ 速度优先</button>
-        <button class="cat${searchSort === 'quality' ? ' active' : ''}" data-sort="quality" data-f tabindex="-1" title="按清晰度排序">🎬 清晰度优先</button>
+        <span class="cat-sep"></span>
+        <button class="cat${searchSort === 'all' ? ' active' : ''}" data-sort="all" data-f tabindex="-1" title="多源收录优先">综合排序</button>
+        <button class="cat${searchSort === 'speed' ? ' active' : ''}" data-sort="speed" data-f tabindex="-1" title="按响应速度排序">⚡ 速度优先</button>
+        <button class="cat${searchSort === 'quality' ? ' active' : ''}" data-sort="quality" data-f tabindex="-1" title="按最高画质排序">🎬 清晰度优先</button>
       </div>
-      <div class="search-bar">
-        <input id="kw" data-f tabindex="-1" placeholder="输入片名,方向键选择,Enter 搜索" />
-        <button class="btn primary" id="do-search" data-f tabindex="-1">搜索</button>
-      </div>
-      <div class="hot-words" id="hot"></div>
       <div id="search-result"></div>`;
 
     view().querySelector('#search-mode').addEventListener('click', e => {
@@ -649,22 +743,85 @@ const App = (() => {
       }
     });
 
-    const hots = ['大雄兔', '辛特尔', '大象的梦想', '钢之泪', '狂飙'];
-    const hot = view().querySelector('#hot');
-    hots.forEach(w => {
-      const b = UI.el(`<button class="cat" data-f tabindex="-1">${w}</button>`);
+    /* 搜索历史 chips */
+    const histRow = view().querySelector('#sr-hist');
+    const hist = getSearchHist();
+    hist.forEach(w => {
+      const b = UI.el(`<button class="chip" data-f tabindex="-1">${escHtml(w)}</button>`);
       b.onclick = () => { view().querySelector('#kw').value = w; doSearch(w); };
-      hot.appendChild(b);
+      histRow.appendChild(b);
     });
-    view().querySelector('#do-search').onclick = () => doSearch(view().querySelector('#kw').value.trim());
-    view().querySelector('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(e.target.value.trim()); });
+    if (hist.length) {
+      const clr = UI.el('<button class="chip ghost" data-f tabindex="-1">清空历史</button>');
+      clr.onclick = () => { localStorage.removeItem(SEARCH_HIST_KEY); pageSearch(); };
+      histRow.appendChild(clr);
+    }
+
+    /* 热搜榜:当前源最新上架(奖牌位),失败退回内置词 */
+    const hotRow = view().querySelector('#sr-hot');
+    const renderHot = words => {
+      hotRow.innerHTML = '<span class="cr-h">热搜榜</span>';
+      words.forEach((w, i) => {
+        const medal = i === 0 ? 'm1' : i === 1 ? 'm2' : i === 2 ? 'm3' : 'mn';
+        const b = UI.el(`<button class="chip${i === 0 ? ' top1' : ''}" data-f tabindex="-1"><span class="medal ${medal}">${i + 1}</span>${escHtml(w)}${i === 0 ? ' <span class="fl">🔥</span>' : ''}</button>`);
+        b.onclick = () => { view().querySelector('#kw').value = w; doSearch(w); };
+        hotRow.appendChild(b);
+      });
+    };
+    (async () => {
+      try {
+        const src = DB.getCurrentSource();
+        const home = await API.home(src);
+        const words = (home.latest || []).filter(x => x && x.name).slice(0, 5).map(x => x.name);
+        if (words.length >= 3 && view().querySelector('#sr-hot')) renderHot(words);
+        else renderHot(['大雄兔', '辛特尔', '大象的梦想', '钢之泪', '狂飙']);
+      } catch (e) {
+        if (view().querySelector('#sr-hot')) renderHot(['大雄兔', '辛特尔', '大象的梦想', '钢之泪', '狂飙']);
+      }
+    })();
+
+    /* 输入框:拼音标识 / 清空 / 联想词 */
+    const kwInput = view().querySelector('#kw');
+    const sugBox = view().querySelector('#sr-sug');
+    const renderSug = () => {
+      const v = kwInput.value.trim();
+      view().querySelector('#sr-py').style.display = /^[a-zA-Z]{2,}$/.test(v) ? '' : 'none';
+      view().querySelector('#kw-clear').style.display = v ? '' : 'none';
+      const pool = [];
+      getSearchHist().forEach(w => { if (v && w !== v && w.toLowerCase().includes(v.toLowerCase())) pool.push({ w, tag: '历史' }); });
+      hotRow.querySelectorAll('.chip').forEach(c => {
+        const w = c.textContent.replace(/^[1-5]/, '').replace('🔥', '').trim();
+        if (v && w && w !== v && w.toLowerCase().includes(v.toLowerCase()) && !pool.some(p => p.w === w)) pool.push({ w, tag: '热搜' });
+      });
+      if (!pool.length) { sugBox.style.display = 'none'; return; }
+      sugBox.innerHTML = '<div class="sug-h">搜索建议</div>';
+      pool.slice(0, 5).forEach((p, i) => {
+        const row = UI.el(`<div class="sug-row${i === 0 ? ' hl' : ''}"><span class="sug-ic">🔍</span><b>${escHtml(p.w).split(escHtml(v)).join('<em>' + escHtml(v) + '</em>')}</b><span class="sug-n">${p.tag}</span></div>`);
+        row.onclick = () => { kwInput.value = p.w; sugBox.style.display = 'none'; doSearch(p.w); };
+        sugBox.appendChild(row);
+      });
+      sugBox.style.display = '';
+    };
+    kwInput.addEventListener('input', renderSug);
+    kwInput.addEventListener('focus', renderSug);
+    kwInput.addEventListener('blur', () => setTimeout(() => { sugBox.style.display = 'none'; }, 180));
+    kwInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { sugBox.style.display = 'none'; doSearch(kwInput.value.trim()); }
+      else if (e.key === 'Escape') sugBox.style.display = 'none';
+    });
+    view().querySelector('#kw-clear').onclick = () => { kwInput.value = ''; kwInput.focus(); kwInput.dispatchEvent(new Event('input')); };
+    view().querySelector('.sr-back').onclick = () => go('home');
+    view().querySelector('#do-search').onclick = () => doSearch(kwInput.value.trim());
+    KeyNav.focusFirst();
   }
 
   async function doSearch(wd) {
     if (!wd) { toastErr('请输入关键词'); return; }
+    saveSearchWord(wd);
     const seq = ++searchSeq;
     const box = view().querySelector('#search-result');
     if (!box) return;
+    const t0 = performance.now();
     box.innerHTML = UI.spinner();
 
     if (searchMode === 'cur') {
@@ -674,7 +831,7 @@ const App = (() => {
         if (seq !== searchSeq) return;
         box.innerHTML = '';
         if (!r.list.length) { box.appendChild(UI.empty(`「${wd}」没有找到结果,试试别的词或换源`)); return; }
-        box.appendChild(UI.el(`<div class="src-head">${src.name} · ${r.list.length} 条</div>`));
+        box.appendChild(UI.el(`<div class="src-head">${escHtml(src.name)} · ${r.list.length} 条 · ${Math.round(performance.now() - t0)}ms</div>`));
         const grid = UI.el('<div class="grid"></div>');
         r.list.forEach(it => grid.appendChild(UI.card(it)));
         box.appendChild(grid);
@@ -687,43 +844,121 @@ const App = (() => {
       return;
     }
 
-    // 全源聚合(纯字母关键词 → 拼音首字母/全拼模式:各源分类列表本地匹配)
+    /* 全源聚合:源状态条实时刷新 → 完成后统一海报墙(同名片合并「N源可播」) */
     const pyMode = /^[a-zA-Z]{2,}$/.test(wd);
-    try {
-      const groups = await (pyMode ? API.searchPinyinAll(wd) : API.searchAll(wd));
-      if (seq !== searchSeq) return;
-      box.innerHTML = '';
-      const okGroups = groups.filter(g => !g.error && g.list.length);
-      const errGroups = groups.filter(g => g.error);
-      const total = okGroups.reduce((s, g) => s + g.list.length, 0);
-      const summary = UI.el(`<div class="src-head">🌐 全源聚合${pyMode ? ' · 拼音模式(' + wd.toUpperCase() + ')' : ''} · ${DB.getSources().length} 个源 · 命中 ${okGroups.length} 源 ${total} 条${errGroups.length ? ' · 失败 ' + errGroups.length + ' 源' : ''}</div>`);
-      box.appendChild(summary);
-      if (pyMode) box.appendChild(UI.el('<div class="hint" style="margin:6px 0 10px">拼音模式:并发扫描各源最近更新与影视主分类(约 400 部/源)按首字母/全拼匹配;较老的片建议直接用中文片名搜索</div>'));
+    const state = { groups: [], done: 0, total: DB.getSources().length };
+    box.innerHTML = `
+      <div class="src-head" id="sr-stat">🌐 全源聚合${pyMode ? ' · 拼音模式(' + escHtml(wd.toUpperCase()) + ')' : ''} · 搜索中 <span id="sr-stat-n">0/${state.total}</span> 源…</div>
+      <div class="sr-srcs" id="sr-srcs"></div>
+      <div class="sr-cats" id="sr-cats" style="display:none"></div>
+      <div class="grid" id="sr-grid"></div>
+      <div class="sr-more" id="sr-more" style="display:none"><button class="btn" data-f tabindex="-1">加载更多</button></div>`;
+    const statEl = box.querySelector('#sr-stat'), statN = box.querySelector('#sr-stat-n');
+    const srcsEl = box.querySelector('#sr-srcs'), catsEl = box.querySelector('#sr-cats');
+    const gridEl = box.querySelector('#sr-grid'), moreEl = box.querySelector('#sr-more');
 
-      if (!okGroups.length) {
-        box.appendChild(UI.empty(`「${wd}」所有源都没有找到结果`));
-        return;
-      }
-      // 排序:速度优先(响应快在前) / 清晰度优先(最高画质备注在前)
-      okGroups.forEach(g => {
-        g.bestQ = Math.max(...g.list.map(it => API.qualityRank(it.remarks)));
+    const onProgress = res => {
+      if (seq !== searchSeq || !view().querySelector('#sr-srcs')) return;
+      state.groups.push(res);
+      state.done++;
+      if (statN) statN.textContent = state.done + '/' + state.total;
+      const avBg = `background:linear-gradient(135deg,hsl(${(res.srcId || '').length * 47 % 360},60%,45%),hsl(${(res.srcId || '').length * 47 % 360},60%,30%))`;
+      const chip = UI.el(res.error
+        ? `<span class="src-chip dim"><span class="av" style="${avBg}">${escHtml(res.srcName[0] || '?')}</span>${escHtml(res.srcName)} · ${escHtml(res.error)}<span class="dot" style="background:var(--red)"></span></span>`
+        : res.list.length
+          ? `<span class="src-chip" data-src="${escHtml(res.srcId)}"><span class="av" style="${avBg}">${escHtml(res.srcName[0] || '?')}</span>${escHtml(res.srcName)}<span class="dot" style="background:var(--green)"></span><span class="ms">${res.ms}ms</span></span>`
+          : `<span class="src-chip dim"><span class="av" style="${avBg}">${escHtml(res.srcName[0] || '?')}</span>${escHtml(res.srcName)} · 无结果<span class="dot" style="background:var(--red)"></span></span>`);
+      chip.dataset.name = res.srcName;
+      srcsEl.appendChild(chip);
+    };
+
+    try {
+      const groups = await (pyMode ? API.searchPinyinAll(wd, onProgress) : API.searchAll(wd, onProgress));
+      if (seq !== searchSeq || !view().querySelector('#sr-srcs')) return;
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+      /* 同名合并:跨源同名片 → 代表项(画质最高) + 源数 + 最快源 */
+      const byName = new Map();
+      groups.filter(g => !g.error).forEach(g => {
+        g.list.forEach(it => {
+          if (!it || !it.name) return;
+          const m = byName.get(it.name) || { it, count: 0, bestMs: g.ms, srcName: g.srcName, frm: typeName(it), q: 0 };
+          m.count++;
+          const q = API.qualityRank(it.remarks);
+          if (q > m.q) { m.q = q; m.it = it; }
+          if (g.ms < m.bestMs) { m.bestMs = g.ms; m.srcName = g.srcName; }
+          if (!m.frm || m.frm === '其他') m.frm = typeName(it);
+        });
       });
-      if (searchSort === 'quality') okGroups.sort((a, b) => b.bestQ - a.bestQ || a.ms - b.ms);
-      else okGroups.sort((a, b) => a.ms - b.ms);
-      okGroups.forEach(g => {
-        if (searchSort === 'quality') {
-          g.list.sort((a, b) => API.qualityRank(b.remarks) - API.qualityRank(a.remarks));
-        }
-        const head = UI.el(`<div class="src-head">${g.srcName} <span class="sub" style="font-weight:400;color:var(--muted);font-size:12px">${g.list.length} 条 · ${g.ms}ms · 最高${{6:'蓝光',5:'1080P',4:'超清',3:'正片',2:'普通',1:'抢先'}[g.bestQ] || '未知'}</span></div>`);
-        box.appendChild(head);
-        const grid = UI.el('<div class="grid"></div>');
-        g.list.slice(0, 12).forEach(it => grid.appendChild(UI.card(it)));
-        box.appendChild(grid);
+      let merged = [...byName.values()];
+      merged.forEach(m => { m.badge = qualityBadge(m.it.remarks); m.cont = m.it.remarks && !qualityBadge(m.it.remarks) ? m.it.remarks : ''; });
+      const sortFns = {
+        all: (a, b) => b.count - a.count || b.q - a.q || a.bestMs - b.bestMs,
+        speed: (a, b) => a.bestMs - b.bestMs,
+        quality: (a, b) => b.q - a.q || a.bestMs - b.bestMs,
+      };
+      merged.sort(sortFns[searchSort] || sortFns.all);
+      state.merged = merged;
+
+      /* 统计头 + 源状态条回填最终测速 */
+      statEl.innerHTML = `「<span class="kw-hl">${escHtml(wd)}</span>」<span class="cnt">${merged.length} 条结果 · ${groups.filter(g => !g.error).length}/${state.total} 个源响应 · 用时 ${elapsed}s</span>`;
+      if (pyMode) statEl.insertAdjacentHTML('afterend', '<div class="hint" style="margin:2px 0 10px">拼音模式:扫描各源最近更新与影视主分类按首字母/全拼匹配;较老的片建议直接用中文片名搜索</div>');
+
+      /* 分类 chips(带数量,点击过滤) */
+      const catCounts = {};
+      merged.forEach(m => { catCounts[m.frm] = (catCounts[m.frm] || 0) + 1; });
+      let curCat = '全部';
+      const renderCats = () => {
+        catsEl.innerHTML = '';
+        const mk = (label, n) => {
+          const b = UI.el(`<button class="cat${curCat === label ? ' on' : ''}" data-f tabindex="-1">${label} ${n}</button>`);
+          b.onclick = () => { curCat = label; renderCats(); renderGrid(true); };
+          catsEl.appendChild(b);
+        };
+        mk('全部', merged.length);
+        Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a]).forEach(k => mk(k, catCounts[k]));
+        catsEl.style.display = '';
+      };
+      /* 源条:点击屏蔽/恢复某源,重新渲染 */
+      let muted = new Set();
+      srcsEl.addEventListener('click', e => {
+        const chip = e.target.closest('.src-chip[data-src]');
+        if (!chip) return;
+        const id = chip.dataset.src;
+        if (muted.has(id)) muted.delete(id); else muted.add(id);
+        chip.classList.toggle('dim', muted.has(id));
+        renderGrid(true);
       });
-      if (errGroups.length) {
-        box.appendChild(UI.el(`<div class="hint" style="margin-top:14px">以下源搜索失败:${errGroups.map(g => g.srcName + '(' + g.error + ')').join('、')}</div>`));
+      const visibleMerged = () => {
+        const ok = new Set(state.groups.filter(g => !g.error && !muted.has(g.srcId)).map(g => g.srcId));
+        return merged.filter(m => {
+          const g = state.groups.find(x => !x.error && x.list.some(it => it.name === m.it.name && x.srcId && ok.has(x.srcId)));
+          return !!g;
+        });
+      };
+
+      /* 分页渲染海报墙(30/页,加载更多) */
+      const PAGE = 30;
+      let shown = 0;
+      const renderGrid = reset => {
+        const list = visibleMerged().filter(m => curCat === '全部' || m.frm === curCat);
+        if (reset) { gridEl.innerHTML = ''; shown = 0; }
+        list.slice(shown, shown + PAGE).forEach(m => gridEl.appendChild(searchCard(m, wd)));
+        shown += PAGE;
+        if (!list.length) gridEl.innerHTML = '';
+        if (!gridEl.children.length) gridEl.appendChild(UI.empty(`「${wd}」${curCat === '全部' ? '没有结果' : '该分类下没有结果'}`));
+        moreEl.style.display = shown < list.length ? '' : 'none';
+        moreEl.querySelector('.btn').textContent = `加载更多(已加载 ${Math.min(shown, list.length)} / ${list.length})`;
+      };
+      renderCats();
+      renderGrid(true);
+      moreEl.querySelector('.btn').onclick = () => renderGrid(false);
+      if (!merged.length) {
+        catsEl.style.display = 'none';
+        gridEl.innerHTML = '';
+        gridEl.appendChild(UI.empty(`「${wd}」所有源都没有找到结果`));
       }
-      KeyNav.focusFirst(box);
+      KeyNav.focusFirst(gridEl);
     } catch (e) {
       if (seq !== searchSeq) return;
       box.innerHTML = '';
@@ -1041,9 +1276,10 @@ const App = (() => {
       '<div class="detail-actions">' +
       '<button class="btn primary" id="btn-play" data-f tabindex="-1">播放本文件</button>' +
       '</div>' +
-      '<div class="intro">' + (meta.intro || '暂无简介') + '</div>' +
-      '</div></div></div>');
+      '</div></div>' +
+      '<div id="info-panel"></div></div>');
     view().appendChild(page);
+    fillInfoPanel(page.querySelector('#info-panel'), meta.title || file.name, meta.year || '', meta.intro || '', meta);
     page.querySelector('#btn-play').onclick = function () {
       Player.open({
         key: 'local|' + file.name + '|' + (file.size || 0),
@@ -1643,12 +1879,14 @@ const App = (() => {
             <button class="btn" id="btn-fav" data-f tabindex="-1">${favBtn}</button>
             ${hist ? '<button class="btn" id="btn-restart" data-f tabindex="-1">从头看</button>' : ''}
           </div>
-          <div class="intro">${d.content || '暂无简介'}</div>
         </div>
       </div>
+      <div id="info-panel"></div>
       <div id="ep-area"></div>
     </div>`);
     view().appendChild(page);
+
+    fillInfoPanel(page.querySelector('#info-panel'), d.name, d.year, d.content);
 
     const btnPlay = page.querySelector('#btn-play');
     btnPlay.onclick = () => playVod(src, d, groups, hist ? hist.epIndex : 0, hist ? hist.position : 0);
@@ -1663,6 +1901,83 @@ const App = (() => {
 
     renderEpisodeGroups(page, groups, { key, name: d.name, pic: d.pic, sourceId: src.id, vodId: d.id, fromName: d.from ? d.from.name : '', title: d.name }, hist);
     KeyNav.focusFirst(page.querySelector('.detail-actions'));
+  }
+
+  /* 全信息面板:影评人评分(烂番茄爆米花指数/IMDb/豆瓣) + 演员定妆圆头像 + 详细梗概 */
+  function fillInfoPanel(host, title, year, cmsIntro, existDouban) {
+    if (!host) return;
+    let synBox = null, synTg = null;
+    const setSyn = function (txt) {
+      if (!txt) return;
+      if (!synBox) {
+        const sec = UI.el('<div class="syn-sec"><div class="sec-label">剧情简介</div></div>');
+        synBox = UI.el('<div class="syn-text collapsed"></div>');
+        sec.appendChild(synBox);
+        synTg = UI.el('<button class="syn-toggle" data-f tabindex="-1">展开全部</button>');
+        synTg.onclick = function () {
+          const cl = synBox.classList.toggle('collapsed');
+          synTg.textContent = cl ? '展开全部' : '收起';
+        };
+        sec.appendChild(synTg);
+        host.appendChild(sec);
+      }
+      synBox.innerHTML = txt;
+      synTg.style.display = String(txt).replace(/<[^>]+>/g, '').length > 150 ? '' : 'none';
+    };
+    setSyn(cmsIntro);
+    if (!window.Scraper || !Scraper.enrich) return;
+    const ld = UI.el('<div class="ip-loading">正在获取评分与演职员资料…</div>');
+    host.insertBefore(ld, host.firstChild);
+    Scraper.enrich(title, year, existDouban).then(function (r) {
+      if (!host.isConnected || !r) return;
+      ld.remove();
+      const rateRow = UI.el('<div class="rate-row"></div>');
+      if (r.rt && (r.rt.popcorn || r.rt.critics)) {
+        const c = UI.el('<div class="rate-chip" data-f tabindex="-1"><span class="rc-src rt">烂番茄</span><b class="rc-val">' + (r.rt.popcorn ? r.rt.popcorn + '%' : '—') + '</b><span class="rc-sub">爆米花指数' + (r.rt.critics ? ' · 影评人 ' + r.rt.critics + '%' : '') + '</span></div>');
+        if (r.rt.url) c.onclick = function () { window.open(r.rt.url, '_blank'); };
+        rateRow.appendChild(c);
+      }
+      if (r.imdb && r.imdb.imdbRating) {
+        const c = UI.el('<div class="rate-chip" data-f tabindex="-1"><span class="rc-src imdb">IMDb</span><b class="rc-val">' + esc(r.imdb.imdbRating) + '</b><span class="rc-sub">/ 10</span></div>');
+        if (r.imdb.imdbId) c.onclick = function () { window.open('https://www.imdb.com/title/' + r.imdb.imdbId + '/', '_blank'); };
+        rateRow.appendChild(c);
+      }
+      if (r.douban && r.douban.rating) {
+        const c = UI.el('<div class="rate-chip" data-f tabindex="-1"><span class="rc-src db">豆瓣</span><b class="rc-val">' + Number(r.douban.rating).toFixed(1) + '</b><span class="rc-sub">' + (r.douban.ratingCount ? Math.round(r.douban.ratingCount / 10000) + '万人评' : '暂无人数') + '</span></div>');
+        if (r.douban.doubanUrl) c.onclick = function () { window.open(r.douban.doubanUrl, '_blank'); };
+        rateRow.appendChild(c);
+      }
+      if (rateRow.children.length) host.insertBefore(rateRow, host.firstChild);
+      const cast = (r.cast || []).filter(function (c) { return c && c.name; });
+      if (cast.length) {
+        const sec = UI.el('<div class="cast-sec"><div class="sec-label">演职员</div></div>');
+        const strip = UI.el('<div class="cast-strip"></div>');
+        cast.forEach(function (c) {
+          const it = UI.el('<div class="cast-item" data-f tabindex="-1"></div>');
+          const nm = UI.el('<span class="cast-name">' + esc(c.name) + '</span>');
+          const fb = UI.el('<span class="cast-ava fb">' + esc(String(c.name).slice(0, 1)) + '</span>');
+          if (c.avatar) {
+            const ava = document.createElement('img');
+            ava.className = 'cast-ava';
+            ava.loading = 'lazy';
+            ava.alt = c.name;
+            ava.src = (window.Scraper && Scraper.imgProxy) ? Scraper.imgProxy(c.avatar) : c.avatar;
+            ava.onerror = function () { ava.style.display = 'none'; fb.style.display = 'flex'; };
+            it.appendChild(ava);
+          } else {
+            fb.style.display = 'flex';
+          }
+          it.appendChild(fb);
+          it.appendChild(nm);
+          if (c.character) it.appendChild(UI.el('<span class="cast-role">' + esc(c.character) + '</span>'));
+          strip.appendChild(it);
+        });
+        sec.appendChild(strip);
+        host.insertBefore(sec, synBox ? synBox.parentNode : null);
+      }
+      const dbIntro = r.douban && r.douban.intro || '';
+      if (String(dbIntro).length > String(cmsIntro || '').length) setSyn(dbIntro);
+    }).catch(function () { ld.remove(); });
   }
 
   function renderEpisodeGroups(page, groups, rec, hist) {

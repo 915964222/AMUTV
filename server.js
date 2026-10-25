@@ -108,7 +108,13 @@ function parseProxyTarget(req, u) {
     if (u.pathname.startsWith(prefix)) {
       let t = u.pathname.slice(prefix.length);
       try { t = decodeURIComponent(t); } catch {}
-      if (u.search) t += u.search;
+      if (u.search) {
+        // 拼回目标自身 query,但剥离代理专属参数(h=自定义头/a=认证),否则会被当成目标参数污染上游请求
+        const sp = new URLSearchParams(u.search);
+        sp.delete('h'); sp.delete('a');
+        const rest = sp.toString();
+        if (rest) t += (t.indexOf('?') > -1 ? '&' : '?') + rest;
+      }
       return t;
     }
   }
