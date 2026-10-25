@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>防盗链测试页(嗅探演示)</title>
+<style>body{font-family:sans-serif;background:#111;color:#eee;padding:30px}a{color:#ffb300}</style>
+</head>
+<body>
+<h2>模拟"加密/动态加载"的网页视频</h2>
+<p>此页面 2 秒后才动态创建播放器并请求真实直链,用于验证底层嗅探引擎能否捕获直链。</p>
+<div id="app">加载中…</div>
+<script>
+  // 模拟站点:视频地址藏在 JS 变量里,2 秒后动态写入 video 标签并通过 fetch 预取
+  var realUrl = '/media/demo.mp4?from=encrypted-page';
+  setTimeout(function () {
+    fetch(realUrl, { method: 'HEAD' }).catch(function(){});
+    var v = document.createElement('video');
+    v.src = realUrl;
+    v.controls = true;
+    v.width = 480;
+    document.getElementById('app').innerHTML = '';
+    document.getElementById('app').appendChild(v);
+    var s = document.createElement('source');
+    s.src = '/media/demo.mp4?alt=hls-test.m3u8';
+    v.appendChild(s);
+  }, 2000);
+</script>
+</body>
+</html>

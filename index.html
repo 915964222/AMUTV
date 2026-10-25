@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMUTV</title>
+<meta name="theme-color" content="#070b14">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css?v=93">
+</head>
+<body>
+<header id="topbar">
+  <div class="logo" data-f tabindex="-1" id="logo-btn" title="AMUTV">
+    <svg viewBox="0 0 64 64" width="42" height="42" aria-label="AMUTV">
+      <line x1="32" y1="17" x2="22" y2="5" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      <line x1="32" y1="17" x2="42" y2="5" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="22" cy="5" r="2.2" fill="#fff"/>
+      <circle cx="42" cy="5" r="2.2" fill="#fff"/>
+      <rect x="8" y="15" width="48" height="41" rx="11" fill="#fff"/>
+      <rect x="14" y="21" width="36" height="29" rx="7" fill="#000"/>
+      <text x="32" y="42" font-size="15" font-weight="900" text-anchor="middle" fill="#fff" font-family="Arial, Helvetica, sans-serif">TV</text>
+      <rect x="17" y="56" width="6" height="4" rx="1.5" fill="#fff"/>
+      <rect x="41" y="56" width="6" height="4" rx="1.5" fill="#fff"/>
+    </svg>
+  </div>
+  <button class="chip" id="source-chip" data-f tabindex="-1" title="切换数据源" style="display:none">播放源</button>
+  <nav id="tabs"></nav>
+  <div class="top-actions">
+    <button class="icon-btn" id="top-search" data-f tabindex="-1" title="搜索">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+    </button>
+    <button class="icon-btn" id="top-set" data-f tabindex="-1" title="设置">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+</header>
+<main id="view"></main>
+<div id="toasts"></div>
+<div id="overlay-root"></div>
+
+<script src="ad-rules.js?v=93"></script>
+<script src="vendor/hls.min.js?v=93"></script>
+<script src="vendor/pinyin-pro.min.js?v=93"></script>
+<script>
+  /* 本地 vendor 缺失时回退 CDN */
+  if (!window.Hls) document.write('<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"><\/script>');
+  if (!window.pinyinPro) document.write('<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.29.5/dist/index.min.js"><\/script>');
+</script>
+<script src="ad-rules.js?v=93"></script>
+<script src="js/scraper.js?v=93"></script>
+<script src="js/subtitle.js?v=93"></script>
+<script src="js/live.js?v=93"></script>
+<script src="js/cloud.js?v=93"></script>
+<script src="js/danmaku.js?v=93"></script>
+<script src="js/store.js?v=93"></script>
+<script src="js/api.js?v=93"></script>
+<script src="js/keynav.js?v=93"></script>
+<script src="js/player.js?v=93"></script>
+<script src="js/ui.js?v=93"></script>
+<script src="js/app.js?v=93"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>

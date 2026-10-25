@@ -1,0 +1,9 @@
+build/
+*.idsig
+*.apk
+tvapp-error.log
+node_modules/
+.DS_Store
+Thumbs.db
+server.log
+android/assets-flat/

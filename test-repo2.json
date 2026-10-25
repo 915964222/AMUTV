@@ -1,0 +1,6 @@
+{
+  "sites": [
+    { "key": "srcA", "name": "测试源A(虚拟)", "type": 1, "api": "https://cj.example-a.com/api.php/provide/vod/" },
+    { "key": "srcB", "name": "测试源B(虚拟)", "type": 1, "api": "https://api.example-b.tv/api.php/provide/vod/" }
+  ]
+}

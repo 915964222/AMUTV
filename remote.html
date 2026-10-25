@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>影视TV · 遥控器</title>
+<style>
+  :root { --bg:#070b14; --panel:#121826; --line:#232c3f; --text:#eef2f8; --muted:#8b95a7; --acc:#4da3ff; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; min-height:100vh; padding:16px; max-width:520px; margin:0 auto; }
+  h1 { font-size:17px; text-align:center; margin:4px 0 14px; color:var(--muted); font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .np-title { font-size:16px; font-weight:700; }
+  .np-sub { font-size:13px; color:var(--muted); margin-top:4px; }
+  .np-time { font-size:12.5px; color:var(--muted); margin-top:8px; display:flex; justify-content:space-between; }
+  input[type=range] { width:100%; margin-top:8px; accent-color:var(--acc); height:26px; }
+  .pad { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:12px; }
+  .pad button, .row button, .eps button {
+    background:#1b2334; color:var(--text); border:1px solid var(--line); border-radius:12px;
+    padding:13px 0; font-size:15px; cursor:pointer; }
+  .pad button:active, .row button:active, .eps button:active { background:var(--acc); color:#001; }
+  .pad .main { background:var(--acc); color:#001; font-weight:800; font-size:17px; }
+  .row { display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .row button { flex:1; min-width:100px; }
+  .eps { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+  .eps button { padding:9px 0; font-size:13px; }
+  .eps button.cur { background:var(--acc); color:#001; font-weight:700; }
+  .idle { text-align:center; color:var(--muted); padding:40px 10px; font-size:14.5px; line-height:2; }
+  .offline { text-align:center; color:#e2564f; padding:30px 10px; font-size:14px; }
+  .sec { font-size:13px; color:var(--muted); margin:12px 0 8px; }
+</style>
+</head>
+<body>
+<h1>📺 影视TV · 遥控器</h1>
+<div id="app"><div class="idle">正在连接电视端…</div></div>
+
+<script>
+(function () {
+  'use strict';
+  const app = document.getElementById('app');
+  let last = null, dragging = false, dragVal = 0;
+  let lastOffline = false;
+
+  function send(type, arg) {
+    fetch('/rc/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type, arg: arg }) }).catch(function () {});
+  }
+  function fmt(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(ss).padStart(2, '0');
+  }
+
+  function renderIdle(msg) {
+    if (app.dataset.mode === 'idle') return;
+    app.dataset.mode = 'idle';
+    app.innerHTML = '<div class="idle">' + msg + '</div>';
+  }
+
+  function render(st) {
+    if (st.ended) { renderIdle('电视端没有在播放<br>在电视上打开一部影片后,这里会自动出现遥控面板'); return; }
+    const first = app.dataset.mode !== 'np';
+    app.dataset.mode = 'np';
+    if (first || st.title !== (last && last.title) || st.ep !== (last && last.ep)) {
+      app.innerHTML = `
+        <div class="card" id="np">
+          <div class="np-title" id="t"></div>
+          <div class="np-sub" id="s"></div>
+          <div class="np-time"><span id="c"></span><span id="d"></span></div>
+          <input type="range" id="seek" min="0" max="1000" value="0">
+        </div>
+        <div class="card">
+          <div class="pad">
+            <button data-a="seek:-30">⏪ 30秒</button>
+            <button class="main" data-a="toggle" id="pp">⏸</button>
+            <button data-a="seek:30">30秒 ⏩</button>
+            <button data-a="prev">⏮ 上一集</button>
+            <button data-a="fs">⛶ 全屏</button>
+            <button data-a="next">下一集 ⏭</button>
+          </div>
+          <div class="sec">音量</div>
+          <input type="range" id="vol" min="0" max="100" value="80">
+          <div class="row">
+            <button data-a="rate:0.75">0.75x</button><button data-a="rate:1">1x</button>
+            <button data-a="rate:1.25">1.25x</button><button data-a="rate:2">2x</button>
+          </div>
+          <div class="row"><button data-a="exit" style="color:#e2564f">■ 关闭播放器</button></div>
+        </div>
+        <div class="card">
+          <div class="sec" id="gname" style="margin-top:0">选集</div>
+          <div class="eps" id="eps"></div>
+        </div>`;
+      app.querySelector('#seek').addEventListener('input', function () { dragging = true; dragVal = this.value; });
+      app.querySelector('#seek').addEventListener('change', function () {
+        dragging = false;
+        if (last && last.duration) send('settime', this.value / 1000 * last.duration);
+      });
+      app.querySelector('#vol').addEventListener('change', function () { send('vol', this.value / 100); });
+      app.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-a]'); if (!b) return;
+        const [a, v] = b.dataset.a.split(':');
+        if (a === 'seek' || a === 'rate') send(a, Number(v));
+        else send(a);
+      });
+    }
+    app.querySelector('#t').textContent = st.title || '未知';
+    app.querySelector('#s').textContent = (st.group ? st.group + ' · ' : '') + (st.ep || '') + (st.live ? ' · 直播' : '');
+    app.querySelector('#c').textContent = fmt(st.time);
+    app.querySelector('#d').textContent = st.duration ? fmt(st.duration) : (st.live ? '直播' : '--:--');
+    const seek = app.querySelector('#seek');
+    if (!dragging && st.duration) seek.value = Math.round(st.time / st.duration * 1000);
+    app.querySelector('#pp').textContent = st.paused ? '▶' : '⏸';
+    const eps = app.querySelector('#eps');
+    if ((st.eps || []).join('|') !== eps.dataset.src) {
+      eps.dataset.src = (st.eps || []).join('|');
+      eps.innerHTML = '';
+      (st.eps || []).forEach(function (n, i) {
+        const b = document.createElement('button');
+        b.textContent = (i + 1);
+        b.title = n;
+        if (i === st.epIndex) b.className = 'cur';
+        b.onclick = function () { send('ep', { g: st.groupIndex, e: i }); };
+        eps.appendChild(b);
+      });
+      app.querySelector('#gname').textContent = '选集 · ' + (st.group || '') + '(' + (st.eps || []).length + '集)';
+    }
+  }
+
+  async function poll() {
+    try {
+      const st = await fetch('/rc/state?_=' + Date.now()).then(function (r) { return r.json(); });
+      lastOffline = false;
+      last = (st && !st.ended) ? st : last;
+      render(st || { ended: true });
+    } catch (e) {
+      if (!lastOffline) { lastOffline = true; app.dataset.mode = ''; app.innerHTML = '<div class="offline">连接不到电视端<br>请确认手机与电视/电脑连的是同一个 Wi-Fi</div>'; }
+    }
+  }
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>

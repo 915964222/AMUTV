@@ -1,0 +1,14 @@
+{
+  "name": "影视TV",
+  "short_name": "影视TV",
+  "description": "类TVBox影视应用 · 大屏遥控器体验",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-mask.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

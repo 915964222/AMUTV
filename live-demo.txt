@@ -1,0 +1,5 @@
+演示频道,#genre#
+大雄兔轮播,https://media.w3.org/2010/05/bunny/movie_300.mp4
+辛特尔剧场,https://media.w3.org/2010/05/sintel/trailer.mp4
+大象纪录片,https://media.w3.org/2010/05/video/movie_300.mp4
+HLS测试台,https://test-streams.mux.dev/pts_shift/master.m3u8

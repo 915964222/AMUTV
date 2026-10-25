@@ -1,0 +1,8 @@
+{
+  "sites": [
+    { "key": "ffzy", "name": "非凡影视", "type": 1, "api": "http://api.ffzyapi.com/api.php/provide/vod/" },
+    { "key": "lzi", "name": "量子资源", "type": 1, "api": "https://cj.lziapi.com/api.php/provide/vod/at/json/" },
+    { "key": "spider_demo", "name": "某爬虫源(应被跳过)", "type": 3, "api": "csp_XPath" },
+    { "key": "demo", "name": "演示站(相对地址clan)", "type": 1, "api": "clan://localhost/api.php/provide/vod/" }
+  ]
+}

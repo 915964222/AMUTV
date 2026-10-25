@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>影视TV · 推送配置</title>
+<style>
+  :root { --bg:#070b14; --panel:#121826; --line:#232c3f; --text:#eef2f8; --muted:#8b95a7; --acc:#4da3ff; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; min-height:100vh; padding:18px; max-width:520px; margin:0 auto; }
+  h1 { font-size:17px; text-align:center; margin:6px 0 16px; color:var(--muted); font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  label { font-size:13.5px; color:var(--muted); }
+  textarea { width:100%; height:88px; margin:10px 0 12px; background:#0d1320; color:var(--text);
+    border:1px solid var(--line); border-radius:10px; padding:10px; font-size:14px; resize:vertical; }
+  textarea:focus { outline:none; border-color:var(--acc); }
+  button { width:100%; background:var(--acc); color:#001; border:none; border-radius:12px;
+    padding:13px 0; font-size:16px; font-weight:800; cursor:pointer; }
+  button:active { opacity:.8; }
+  #st { margin-top:12px; font-size:13.5px; text-align:center; min-height:18px; }
+  #st.ok { color:#5ad06e; } #st.err { color:#e2564f; }
+  .hint { font-size:12.5px; color:var(--muted); line-height:1.8; margin-top:14px; }
+  .eg { color:#aab4c6; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>📲 推送配置到电视</h1>
+<div class="card">
+  <label>粘贴影视配置接口链接(TVBox 单仓/多仓 JSON)</label>
+  <textarea id="url" placeholder="http://…/xxx.json 或接口地址"></textarea>
+  <button id="go">推送到电视</button>
+  <div id="st"></div>
+  <div class="hint">
+    ① 填入配置链接后点「推送」,电视会自动导入其中的点播源<br>
+    ② 支持单仓 sites / 多仓 urls 格式的 JSON 地址<br>
+    <span class="eg">例:https://tvbox.xxx.com/ck.json</span>
+  </div>
+</div>
+<script>
+(function () {
+  var st = document.getElementById('st');
+  document.getElementById('go').onclick = function () {
+    var url = document.getElementById('url').value.trim();
+    if (!url) { st.className = 'err'; st.textContent = '请先粘贴配置链接'; return; }
+    st.className = ''; st.textContent = '推送中…';
+    fetch('/cfg/push', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ok) { st.className = 'ok'; st.textContent = '✅ 已推送到电视,请在电视上确认导入'; document.getElementById('url').value = ''; }
+        else { st.className = 'err'; st.textContent = '推送失败:' + (d.error || '未知错误'); }
+      })
+      .catch(function () { st.className = 'err'; st.textContent = '连接不到电视端,请确认同一 Wi-Fi'; });
+  };
+})();
+</script>
+</body>
+</html>

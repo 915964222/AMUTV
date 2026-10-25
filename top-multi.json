@@ -1,0 +1,6 @@
+{
+  "urls": [
+    { "url": "http://home.jundie.top:81/top98.json", "name": "top98(爬虫仓实测)" },
+    { "url": "http://localhost:9978/test-repo.json", "name": "本地CMS演示仓" }
+  ]
+}
