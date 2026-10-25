@@ -759,3 +759,24 @@ button, [data-f] { outline: none; }
 .pl-time-row { gap: 14px; margin-bottom: 10px; }
 .pl-bottom { padding: 88px 28px 16px; }
 .pl-title .t-name { font-size: 24px; }
+
+/* ============ 播放器·com.github.tv 参考版(裸图标散排) ============ */
+.pl-ctrls { justify-content: space-between; gap: 0; }
+.pl-ctrls .pc-left, .pl-ctrls .pc-right { display: contents; }
+.pl-ctrls .pc-right .pc-wide { order: -1; }
+.pl-ctrls .pc-btn {
+  width: 48px; height: 48px; background: transparent !important;
+  border: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.pl-ctrls .pc-btn svg { width: 28px; height: 28px; }
+.pl-ctrls .pc-btn:hover { background: rgba(255,255,255,.12) !important; transform: scale(1.05); }
+.pl-ctrls .pc-play { width: 56px; height: 56px; margin: 0; box-shadow: none; }
+.pl-ctrls .pc-play svg { width: 30px; height: 30px; }
+.pl-ctrls .pc-wide {
+  width: 48px; height: 48px; padding: 0; border: none;
+  background: transparent !important; backdrop-filter: none; -webkit-backdrop-filter: none; border-radius: 50%;
+}
+.pl-ctrls .pc-wide svg { width: 26px; height: 26px; }
+.pl-ctrls .pc-wide span { display: none; }
+.pl-time { font-size: 14.5px; opacity: .95; }
+.pl-time-row { gap: 18px; }
