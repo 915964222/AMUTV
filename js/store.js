@@ -160,7 +160,7 @@ const DB = (() => {
 
   /* ---------- 设置 ---------- */
   function getConfig() {
-    return read(KEY.cfg, { proxyMode: true, multiSearch: 6, displayCache: false, autoSwitch: true, skipIntroAuto: true, defaultIntroSec: 90, adFilter: true, sniffAuto: true, scrapeOn: true, kernel: 'auto', decodeMode: 'hw' });
+    return read(KEY.cfg, { proxyMode: true, multiSearch: 6, displayCache: false, autoSwitch: true, skipIntroAuto: true, defaultIntroSec: 90, adFilter: true, sniffAuto: true, scrapeOn: true, kernel: 'auto', decodeMode: 'hw', autoKeyboard: true, preferQuality: '1080' });
   }
 
   /* ---------- 片头/片尾标记(按影片) ---------- */

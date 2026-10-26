@@ -1,7 +1,7 @@
 {
   "name": "yingshi-tv",
   "productName": "影视TV",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "影视TV Web 桌面版 · 类TVBox影视应用",
   "main": "electron-main.js",
   "scripts": {

@@ -25,6 +25,26 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         MiniServer.start(this);   // 局域网遥控/推送/云盘中转(0.0.0.0:9978)
 
+        /* U盘/存储插拔监听:即插即播,挂载/卸载时通知网页(运行期注册在 Android 11+ 仍可收到) */
+        try {
+            android.content.IntentFilter uf = new android.content.IntentFilter();
+            uf.addAction(android.content.Intent.ACTION_MEDIA_MOUNTED);
+            uf.addAction(android.content.Intent.ACTION_MEDIA_UNMOUNTED);
+            uf.addAction(android.content.Intent.ACTION_MEDIA_EJECT);
+            uf.addAction(android.content.Intent.ACTION_MEDIA_REMOVED);
+            uf.addDataScheme("file");
+            registerReceiver(new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context c, android.content.Intent i) {
+                    boolean mounted = android.content.Intent.ACTION_MEDIA_MOUNTED.equals(i.getAction());
+                    if (wv != null) wv.evaluateJavascript(
+                            "window.__onUsb && window.__onUsb(" + mounted + ")", null);
+                }
+            }, uf);
+        } catch (Throwable t) {
+            android.util.Log.e("TVDBG", "usb receiver: " + t);
+        }
+
         wv = new WebView(this);
         wv.setBackgroundColor(Color.parseColor("#070b14"));
         WebSettings s = wv.getSettings();
@@ -78,6 +98,36 @@ public class MainActivity extends Activity {
             }
         });
         wv.addJavascriptInterface(new Object() {
+            /* 遥控软键盘:网页自绘键盘接管输入,这里负责压住/唤起系统输入法 */
+            @android.webkit.JavascriptInterface
+            public void showIme() {
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        try {
+                            if (wv == null) return;
+                            wv.requestFocus();
+                            android.view.inputmethod.InputMethodManager imm =
+                                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                            if (imm != null) imm.showSoftInput(wv, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                        } catch (Throwable t) {}
+                    }
+                });
+            }
+
+            @android.webkit.JavascriptInterface
+            public void hideIme() {
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        try {
+                            if (wv == null) return;
+                            android.view.inputmethod.InputMethodManager imm =
+                                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                            if (imm != null) imm.hideSoftInputFromWindow(wv.getWindowToken(), 0);
+                        } catch (Throwable t) {}
+                    }
+                });
+            }
+
             @android.webkit.JavascriptInterface
             public String fetchText(String url, String referer) {
                 try {
@@ -205,11 +255,29 @@ public class MainActivity extends Activity {
         return Long.MAX_VALUE / 4; // 未知大小时给足余量,靠流结束自然收尾
     }
 
-    /* 返回键:网页有历史则回退,否则退出 */
+    /* 返回键:先交给网页处理(收键盘/关播放器/关弹窗/回首页),网页说没处理才退出。
+     * 单页应用没有浏览历史,以前直接 goBack() 会变成一按返回就退出应用。 */
     @Override
     public void onBackPressed() {
-        if (wv != null && wv.canGoBack()) wv.goBack();
-        else super.onBackPressed();
+        if (wv == null) { super.onBackPressed(); return; }
+        try {
+            wv.evaluateJavascript(
+                "(function(){try{return window.__onBack?window.__onBack():0}catch(e){return 0}})()",
+                new android.webkit.ValueCallback<String>() {
+                    public void onReceiveValue(String v) {
+                        boolean handled = v != null && v.indexOf('1') >= 0;
+                        if (handled) return;
+                        try {
+                            if (wv != null && wv.canGoBack()) wv.goBack();
+                            else MainActivity.super.onBackPressed();
+                        } catch (Throwable t) {
+                            MainActivity.super.onBackPressed();
+                        }
+                    }
+                });
+        } catch (Throwable t) {
+            super.onBackPressed();
+        }
     }
 
     /* 渲染进程崩溃后重建 WebView 并恢复页面 */

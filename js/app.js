@@ -27,9 +27,20 @@ const App = (() => {
     { id: 'hist', name: '历史' },
   ];
   let tab = 'home';
+  let subPage = null;   // 当前是否是二级页(detail 详情 / category 分类),返回键先退回上一级
+  let subFrom = 'home'; // 二级页来自哪个 tab
   let homeCache = new Map();   // srcId -> {classes, latest}
   let catCache = new Map();    // srcId|tid|pg -> data
   let searchSeq = 0;
+
+  /* 分类多重筛选器:当前分类已加载的全部条目(用于客户端按 类型/地区/年份 复合筛选) */
+  let catAll = [];                                   // 已加载条目累加(去重)
+  let catSeen = new Set();                           // 去重 id
+  let catFilter = { cls: new Set(), area: new Set(), year: new Set() }; // 各维度已选值(空集=不过滤)
+  let catLoadedPage = 0;                             // 已加载到的最大页码
+  let catPageCount = 1;                              // 服务端总页数
+  let catLoadingMore = false;                        // 防止并发后台补全
+  let catTid = null, catTname = '';                  // 当前分类(供筛选/加载更多回调)
 
   /* ============ 顶栏 ============ */
   function renderTabs() {
@@ -63,6 +74,9 @@ const App = (() => {
 
   function go(id) {
     tab = id;
+    subPage = null;
+    if (window.OSK) OSK.close(false); // 切页时收起软键盘
+    if (window.Cloud && Cloud.stopLogin) Cloud.stopLogin(); // 切页时停掉云盘扫码轮询
     renderTabs();
     if (id !== 'live' && window.__lvStop) { try { window.__lvStop(); } catch (e) {} }
     if (id === 'home') pageHome();
@@ -211,7 +225,7 @@ const App = (() => {
       try {
         const d = await API.detailOf(src, it.id);
         const groups = d && API.parsePlay(d.raw);
-        if (groups && groups.length) { playVod(src, d, groups, 0); return; }
+        if (groups && groups.length) { playVod(src, d, groups, 'prefer'); return; }
       } catch (_e) {}
       goDetail(it);
     }
@@ -333,51 +347,200 @@ const App = (() => {
   }
 
 
-  /* ============ 分类页 ============ */
+  /* ============ 分类页(含 类型/地区/年份 多重筛选) ============ */
   async function pageCategory(tid, tname, pg = 1, append = false) {
     const src = DB.getCurrentSource();
-    const key = src.id + '|' + tid + '|' + pg;
     if (!append) {
-      view().innerHTML = `<div class="page-title">${tname}</div><div class="cat-row" id="cat-bar">${UI.spinner()}</div><div class="grid" id="cat-grid"></div>`;
+      subPage = 'category'; subFrom = tab;
+      catAll = []; catSeen = new Set();
+      catFilter = { cls: new Set(), area: new Set(), year: new Set() };
+      catLoadedPage = 0; catPageCount = 1; catLoadingMore = false;
+      catTid = tid; catTname = tname;
+      view().innerHTML =
+        `<div class="page-title">${tname}</div>` +
+        `<div class="cat-row" id="cat-bar">${UI.spinner()}</div>` +
+        `<div id="cat-filters" class="filter-bar"></div>` +
+        `<div class="grid" id="cat-grid"></div>` +
+        `<div class="cat-foot" id="cat-foot"></div>`;
       KeyNav.focusFirst();
     }
     let data;
     try {
+      const key = src.id + '|' + tid + '|' + pg;
       if (!catCache.has(key)) catCache.set(key, await API.category(src, tid, pg));
       data = catCache.get(key);
     } catch (e) {
-      view().innerHTML = '';
-      view().appendChild(UI.empty('分类加载失败:' + (e.message || e), '重试', () => pageCategory(tid, tname, 1)));
+      if (!append && !catAll.length) {
+        view().innerHTML = '';
+        view().appendChild(UI.empty('分类加载失败:' + (e.message || e), '重试', () => pageCategory(tid, tname, 1)));
+      } else {
+        toast('加载更多失败:' + (e.message || e));
+      }
       return;
     }
+    data.list.forEach(it => { if (!catSeen.has(it.id)) { catSeen.add(it.id); catAll.push(it); } });
+    catLoadedPage = Math.max(catLoadedPage, pg);
+    catPageCount = data.pagecount || catPageCount;
 
-    // 分类条:清掉加载圈,填充分类chips(当前分类高亮)
+    await renderCatBar(src, tid);
+    renderCatFilters();
+    renderCatGrid();
+
+    // 自动补全:筛选项激活且仍有更多分页时,后台拉取更多以丰富筛选结果(限流)
+    if (isFilterActive() && catAll.length < 400 && catLoadedPage < catPageCount) {
+      ensureCatPages(src);
+    }
+  }
+
+  /* 顶部分类条(大类,服务端 t 维度):点击切换大类并重置子筛选 */
+  async function renderCatBar(src, tid) {
     const bar = document.getElementById('cat-bar');
-    if (bar) {
-      try {
-        if (!homeCache.has(src.id)) homeCache.set(src.id, await API.home(src));
-      } catch (_e) {}
-      bar.innerHTML = '';
-      const cls = (homeCache.get(src.id) || {}).classes || [];
-      cls.forEach(c => {
-        const b = UI.el(`<button class="cat${c.type_id === String(tid) ? ' active' : ''}" data-f tabindex="-1">${c.type_name}</button>`);
-        b.onclick = () => pageCategory(c.type_id, c.type_name, 1);
-        bar.appendChild(b);
+    if (!bar) return;
+    try { if (!homeCache.has(src.id)) homeCache.set(src.id, await API.home(src)); } catch (_e) {}
+    bar.innerHTML = '';
+    const cls = (homeCache.get(src.id) || {}).classes || [];
+    cls.forEach(c => {
+      const b = UI.el(`<button class="cat${c.type_id === String(tid) ? ' active' : ''}" data-f tabindex="-1">${c.type_name}</button>`);
+      b.onclick = () => pageCategory(c.type_id, c.type_name, 1);
+      bar.appendChild(b);
+    });
+    if (!cls.length) bar.style.display = 'none';
+  }
+
+  function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+  /* 把逗号/顿号/斜杠分隔的多值字段拆开 */
+  function splitVals(s) {
+    return String(s || '').split(/[,，、/]/).map(x => x.trim()).filter(Boolean);
+  }
+  /* 统计某字段的去重值及其出现次数 */
+  function distinctVals(field, split) {
+    const m = new Map();
+    catAll.forEach(it => {
+      let vals;
+      if (split) vals = splitVals(it[field]);
+      else { const y = String(it[field] || '').trim(); vals = [/^\d{4}$/.test(y) ? y : '其他']; }
+      vals.forEach(v => m.set(v, (m.get(v) || 0) + 1));
+    });
+    return m;
+  }
+  /* 复合筛选:维度内 OR,维度间 AND */
+  function catMatches(it) {
+    const f = catFilter;
+    if (f.cls.size) {
+      const vals = splitVals(it.cls);
+      if (![...f.cls].some(x => vals.includes(x))) return false;
+    }
+    if (f.area.size) {
+      const vals = splitVals(it.area);
+      if (![...f.area].some(x => vals.includes(x))) return false;
+    }
+    if (f.year.size) {
+      const y = String(it.year || '').trim();
+      if (!f.year.has(/^\d{4}$/.test(y) ? y : '其他')) return false;
+    }
+    return true;
+  }
+  function isFilterActive() {
+    return catFilter.cls.size || catFilter.area.size || catFilter.year.size;
+  }
+
+  /* 渲染 类型/地区/年份 三组筛选 chips(值从已加载数据动态生成);自动保留键盘焦点 */
+  function renderCatFilters() {
+    const box = document.getElementById('cat-filters');
+    if (!box) return;
+    const af = document.activeElement;
+    let preserve = null;
+    if (af && box.contains(af) && af.dataset && af.dataset.fg) {
+      preserve = af.dataset.all ? { g: af.dataset.fg, all: 1 } : { g: af.dataset.fg, v: af.dataset.fv };
+    }
+    box.innerHTML = '';
+    const groups = [
+      { key: 'cls', label: '类型', vals: distinctVals('cls', true), sort: 'freq' },
+      { key: 'area', label: '地区', vals: distinctVals('area', true), sort: 'freq' },
+      { key: 'year', label: '年份', vals: distinctVals('year', false), sort: 'year' },
+    ];
+    let anyOpts = false;
+    groups.forEach(g => {
+      if (!g.vals.size) return;
+      anyOpts = true;
+      const wrap = UI.el(`<div class="filter-group"><span class="fgroup-head">${g.label}</span><div class="cat-row fchips"></div></div>`);
+      const chips = wrap.querySelector('.fchips');
+      const allActive = catFilter[g.key].size === 0;
+      const allChip = UI.el(`<button class="cat${allActive ? ' active' : ''}" data-f tabindex="-1" data-fg="${g.key}" data-all="1">全部</button>`);
+      allChip.onclick = () => { catFilter[g.key].clear(); onFilterChange(); };
+      chips.appendChild(allChip);
+      const arr = [...g.vals.entries()];
+      if (g.sort === 'year') arr.sort((a, b) => (b[0] === '其他' ? -1 : a[0] === '其他' ? 1 : Number(b[0]) - Number(a[0])));
+      else arr.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'));
+      arr.forEach(([v, n]) => {
+        const on = catFilter[g.key].has(v);
+        const chip = UI.el(`<button class="cat${on ? ' active' : ''}" data-f tabindex="-1" data-fg="${g.key}" data-fv="${escAttr(v)}">${v} <span class="chip-n">${n}</span></button>`);
+        chip.onclick = () => { if (on) catFilter[g.key].delete(v); else catFilter[g.key].add(v); onFilterChange(); };
+        chips.appendChild(chip);
       });
+      box.appendChild(wrap);
+    });
+    if (!anyOpts) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    if (isFilterActive()) {
+      const clr = UI.el(`<button class="cat filter-clear" data-f tabindex="-1">清除筛选 ✕</button>`);
+      clr.onclick = () => { catFilter = { cls: new Set(), area: new Set(), year: new Set() }; onFilterChange(); };
+      box.appendChild(clr);
     }
+    if (preserve) {
+      const sel = preserve.all
+        ? box.querySelector(`[data-fg="${preserve.g}"][data-all="1"]`)
+        : box.querySelector(`[data-fg="${preserve.g}"][data-fv="${escAttr(preserve.v)}"]`);
+      if (sel) sel.focus();
+    }
+  }
 
+  /* 筛选/加载更多后重绘海报墙与底部计数 */
+  function renderCatGrid() {
     const grid = document.getElementById('cat-grid');
-    data.list.forEach(it => grid.appendChild(UI.card(it)));
-
-    // 加载更多
-    const old = view().querySelector('.load-more');
-    if (old) old.remove();
-    if (data.pagecount && data.page < data.pagecount) {
-      const lm = UI.el(`<div class="load-more"><button data-f tabindex="-1">加载更多(第${pg + 1}页)</button></div>`);
-      lm.querySelector('button').onclick = () => pageCategory(tid, tname, pg + 1, true);
-      view().appendChild(lm);
+    const foot = document.getElementById('cat-foot');
+    if (!grid || !foot) return;
+    const list = catAll.filter(catMatches);
+    grid.innerHTML = '';
+    list.forEach(it => grid.appendChild(UI.card(it)));
+    foot.innerHTML = '';
+    foot.appendChild(UI.el(`<div class="filter-cnt">${isFilterActive() ? `筛选结果 ${list.length} 部 · 已从加载的 ${catAll.length} 部中过滤` : `共 ${list.length} 部`}</div>`));
+    if (catLoadedPage < catPageCount) {
+      const lm = UI.el(`<button class="cat" data-f tabindex="-1">加载更多（第 ${catLoadedPage + 1} 页）</button>`);
+      lm.onclick = () => pageCategory(catTid, catTname, catLoadedPage + 1, true);
+      foot.appendChild(lm);
     }
-    if (!data.list.length && !grid.children.length) view().appendChild(UI.empty('该分类暂无内容'));
+    if (!list.length) grid.appendChild(UI.empty(isFilterActive() ? '没有符合筛选条件的影片,试试放宽条件' : '该分类暂无内容'));
+  }
+
+  /* 筛选变化:重建 chips 与海报墙(焦点保留由 renderCatFilters 处理) */
+  function onFilterChange() {
+    renderCatFilters();
+    renderCatGrid();
+  }
+
+  /* 后台自动补全:筛选项激活时,顺序拉取剩余分页(限 400 部/20 页),边拉边刷新 */
+  async function ensureCatPages(src) {
+    if (catLoadingMore) return;
+    catLoadingMore = true;
+    try {
+      let pg = catLoadedPage + 1;
+      while (pg <= catPageCount && catAll.length < 400 && pg <= 20) {
+        const key = src.id + '|' + catTid + '|' + pg;
+        let data;
+        if (catCache.has(key)) data = catCache.get(key);
+        else { try { data = await API.category(src, catTid, pg); catCache.set(key, data); } catch (e) { break; } }
+        if (!data || !data.list) break;
+        data.list.forEach(it => { if (!catSeen.has(it.id)) { catSeen.add(it.id); catAll.push(it); } });
+        catLoadedPage = pg;
+        catPageCount = data.pagecount || catPageCount;
+        renderCatFilters();
+        renderCatGrid();
+        pg++;
+      }
+    } finally {
+      catLoadingMore = false;
+    }
   }
 
   /* 设备解码能力检测:4K/8K/HEVC/AV1/杜比视界/HDR10(绿=流畅硬解,白=可解,灰=不支持) */
@@ -459,7 +622,7 @@ const App = (() => {
         '<button class="btn primary" id="live-add-url" data-f tabindex="-1">导入URL</button></div>' +
         '<div class="form" style="margin-top:10px"><textarea id="live-text" data-f tabindex="-1" placeholder="…或粘贴 M3U(#EXTINF…)/txt(频道名,地址) 内容"></textarea>' +
         '<button class="btn" id="live-add-text" data-f tabindex="-1">导入文本</button></div>' +
-        '<div class="hint">支持 TVBox 配置里 lives 段的 m3u/txt;分组识别 #EXTINF group-title 与 组名,#genre# 两种格式。EPG 节目单自动匹配(51zmt 数据源)。</div></div>');
+        '<div class="hint">支持 m3u / txt / TVBox 配置接口(自动提取 lives 直播段,含饭太硬式图片伪装配置);分组识别 #EXTINF group-title 与 组名,#genre# 两种格式。EPG 节目单自动匹配(51zmt 数据源)。</div></div>');
       if (pls.length) {
         const back = UI.el('<div style="margin-top:12px"><button class="btn" data-f tabindex="-1">取消</button></div>');
         back.querySelector('button').onclick = () => { liveState.showImport = false; pageLive(); };
@@ -498,14 +661,38 @@ const App = (() => {
   }
 
   /* 直播源拉取:多候选逐个回退;raw.githubusercontent 候选自动补 ghproxy 镜像;
-     网络错误/内容校验失败都继续下一个,最终错误信息带最后原因 */
+     网络错误/内容校验失败都继续下一个,最终错误信息带最后原因
+     ⚠ 传输通道按环境自适应(这是"Failed to fetch"的根因):
+       浏览器/桌面版:① /proxy/ 本地代理(绕 CORS) → ② 直连(源站带 CORS 头时可用)
+       安卓 App(file:// 源):相对路径 '/proxy/xxx' 会被解析成 file:///proxy/xxx 必然失败,
+         故改为 ① 本机 MiniServer http://127.0.0.1:9978/proxy/(异步,不卡 UI)
+                   → ② 直连(已放行跨域) → ③ YSTV Java 桥(同步阻塞,放最后兜底) */
+  const LIVE_IN_APP = location.protocol === 'file:';
+  const APP_SRV = 'http://127.0.0.1:9978';
   async function liveFetchText(urlOrList) {
     const looksOk = t => t && t.length > 30 && !/^proxy error/i.test(t) &&
       (/#EXTM3U|#EXTINF|#genre#|^https?:\/\/\/?(\S+\s*,\s*https?:)|,/m.test(t));
-    const tryFetch = async u => {
-      const r = await fetch(/^https?:/i.test(u) ? ('/proxy/' + u) : u);
+    const viaHttp = async u => {
+      const r = await fetch(u);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
+    };
+    /* 代理链:目标去掉 fragment,再拼到代理路径后(源站 query 会作为代理 query 传回,服务端会还原) */
+    const proxyPath = (base, u) => base + encodeURI(String(u).split('#')[0]);
+    /* 同一地址的候选通道:按顺序尝试,任一成功即用 */
+    const transports = u => {
+      const list = [];
+      if (LIVE_IN_APP) {
+        list.push(() => viaHttp(proxyPath(APP_SRV + '/proxy/', u)));   // 本机迷你服务器代理
+        list.push(() => viaHttp(u));                                    // 直连(已放行跨域)
+        if (window.YSTV && window.YSTV.fetchText) {
+          list.push(async () => window.YSTV.fetchText(u, ''));           // Java 桥(失败返回空串)
+        }
+      } else {
+        list.push(() => viaHttp(proxyPath('/proxy/', u)));               // 本地代理
+        list.push(() => viaHttp(u));                                    // 直连兜底(源站带 CORS 头时可用)
+      }
+      return list;
     };
     const cands = (Array.isArray(urlOrList) ? urlOrList : [urlOrList]).filter(Boolean);
     const expanded = [];
@@ -517,15 +704,101 @@ const App = (() => {
     });
     let lastErr = '';
     for (const u of expanded) {
-      try {
-        const text = await tryFetch(u);
+      for (const fn of transports(u)) {
+        let text = '';
+        try {
+          text = await fn();
+        } catch (e) {
+          lastErr = (e && e.message) || '网络错误';
+          continue;
+        }
+        if (!text) { if (!lastErr) lastErr = '空响应'; continue; }
         if (looksOk(text)) return text;
         lastErr = '内容无效(' + String(text).trim().slice(0, 36) + ')';
-      } catch (e) {
-        lastErr = (e && e.message) || '网络错误';
       }
     }
+    if (LIVE_IN_APP && /Failed to fetch|网络错误|ECONN|Empty response/i.test(lastErr)) {
+      lastErr = 'App 内无法访问该源(检查网络或换用其它源)';
+    }
     throw new Error('内容无效或拉取失败(' + lastErr + ')');
+  }
+
+  /* 智能导入:除普通 m3u/txt 外,还能识别
+   *  1) TVBox 配置(JSON,含 // 注释):自动提取 lives 段里 type 0 的直播地址
+   *  2) 图片伪装配置(饭太硬):okhttp UA 才返回图片,JPEG EOI 之后藏 base64 配置 */
+  async function liveImportSmart(url) {
+    const viaProxy = (u, ua) => {
+      let p = (LIVE_IN_APP ? APP_SRV + '/proxy/' : '/proxy/') + encodeURI(String(u).split('#')[0]);
+      if (ua) p += (p.includes('?') ? '&' : '?') + 'h=' + encodeURIComponent('User-Agent: ' + ua);
+      return p;
+    };
+    const fetchRaw = async (u, ua) => {
+      const r = await fetch(viaProxy(u, ua));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return new Uint8Array(await r.arrayBuffer());
+    };
+    /* 图片伪装配置解码:EOI 后文本 → 去 '**' 伪装头 → base64 */
+    const decodeImageConfig = bytes => {
+      const isJpg = bytes[0] === 0xFF && bytes[1] === 0xD8;
+      const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+      const isBmp = bytes[0] === 0x42 && bytes[1] === 0x4D;
+      if (!isJpg && !isPng && !isBmp) return null;
+      let tailBytes;
+      if (isJpg) {
+        let i = -1;
+        for (let k = bytes.length - 2; k > 4; k--) { if (bytes[k] === 0xFF && bytes[k + 1] === 0xD9) { i = k + 2; break; } }
+        if (i < 0) return null;
+        tailBytes = bytes.slice(i);
+      } else {
+        /* PNG/BMP:取最后 1/3 做启发式提取(实践上饭太硬只用 JPEG) */
+        tailBytes = bytes.slice(bytes.length - Math.floor(bytes.length / 3));
+      }
+      let s = '';
+      tailBytes.forEach(c => { s += String.fromCharCode(c); });
+      const b64 = (s.includes('**') ? s.split('**').pop() : s).replace(/[^A-Za-z0-9+/=]/g, '');
+      if (b64.length < 100) return null;
+      try {
+        const bin = atob(b64);
+        const out = new Uint8Array(bin.length);
+        for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+        const txt = new TextDecoder('utf-8').decode(out);
+        return /"lives"|"sites"|"spider"/.test(txt) ? txt : null;
+      } catch (e) { return null; }
+    };
+    const extractLives = cfgText => {
+      const clean = cfgText.split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n');
+      let j;
+      try { j = JSON.parse(clean); } catch (e) { return null; }
+      if (!j || !Array.isArray(j.lives)) return null;
+      return j.lives.filter(x => x && /^https?:/i.test(String(x.url || '')) && !/^https?:\/\/127\.0\.0\.1/i.test(x.url))
+        .map(x => ({ name: String(x.name || '直播源').slice(0, 30), url: String(x.url) }));
+    };
+    /* 1) 先按 okhttp UA 取原始字节(覆盖 TVBox 生态地址与图片伪装) */
+    for (const ua of ['okhttp/3.15', '']) {
+      try {
+        const bytes = await fetchRaw(url, ua);
+        /* 图片伪装 */
+        const cfg = decodeImageConfig(bytes);
+        if (cfg) {
+          const list = extractLives(cfg);
+          if (list && list.length) return { type: 'config', list, raw: cfg };
+        }
+        /* 普通 JSON 配置 */
+        const asText = new TextDecoder('utf-8').decode(bytes);
+        const list = extractLives(asText);
+        if (list && list.length) return { type: 'config', list, raw: asText };
+        /* 是 m3u/txt 直接当列表 */
+        if (/#EXTM3U|#EXTINF|#genre#/i.test(asText) || /^[^\n<>{]*,[^\n]*https?:/m.test(asText)) {
+          return { type: 'playlist', raw: asText };
+        }
+        if (asText.length > 30 && !/^\s*</.test(asText)) return { type: 'playlist', raw: asText };
+      } catch (e) { /* 换下一通道 */ }
+    }
+    /* 2) 兜底:原 liveFetchText 多通道 */
+    const text = await liveFetchText(url);
+    const list = extractLives(text);
+    if (list && list.length) return { type: 'config', list, raw: text };
+    return { type: 'playlist', raw: text };
   }
 
   function bindLiveImport() {
@@ -535,11 +808,27 @@ const App = (() => {
       if (!/^https?:/i.test(url)) { toastErr('请填写 http(s) 地址'); return; }
       toast('正在拉取…');
       try {
-        const text = await liveFetchText(url);
-        const r = Live.addPlaylist(url.split('/').pop().slice(0, 24), url, text);
-        if (!r.ok) { toastErr(r.msg); return; }
-        liveState.pl = r.id; Live.setCurrentPl(r.id); liveState.showImport = false;
-        toast('导入成功'); pageLive();
+        const imp = await liveImportSmart(url);
+        if (imp.type === 'config') {
+          /* TVBox 配置:逐个导入 lives 里的直播源 */
+          let added = 0, lastId = null;
+          for (const lv of imp.list.slice(0, 10)) {
+            try {
+              const text = await liveFetchText(lv.url);
+              const r = Live.addPlaylist(lv.name, lv.url, text);
+              if (r.ok) { added++; lastId = r.id; }
+            } catch (e) { /* 单个源失败跳过 */ }
+          }
+          if (!added) throw new Error('配置里的直播源均不可用');
+          liveState.pl = lastId; Live.setCurrentPl(lastId); liveState.showImport = false;
+          toast('已从配置导入 ' + added + ' 个直播源');
+          pageLive();
+        } else {
+          const r = Live.addPlaylist(url.split('/').pop().slice(0, 24), url, imp.raw);
+          if (!r.ok) { toastErr(r.msg); return; }
+          liveState.pl = r.id; Live.setCurrentPl(r.id); liveState.showImport = false;
+          toast('导入成功'); pageLive();
+        }
       } catch (e) { toastErr('拉取失败:' + (e.message || e)); }
     };
     const b2 = view().querySelector('#live-add-text');
@@ -577,6 +866,15 @@ const App = (() => {
   const lvPad3 = n => String(n).padStart(3, '0');
 
   function renderLiveUI(pls, plObj) {
+    /* 预约提醒轮询:到点提示并自动跳到该频道(仅直播页开启,离开页面由 __lvStop 之外的 go() 清理) */
+    Live.startReminderLoop(function (r) {
+      toast('⏰ 预约提醒:' + r.chName + ' ' + r.start + ' ' + r.title);
+      const g = liveState.groups.find(x => x.name === r.groupName) || liveState.groups.find(x => x.channels.some(c => c.name === r.chName));
+      const ch = g && g.channels.find(c => c.name === r.chName);
+      if (ch && g) {
+        try { playLive(ch, g, 0); } catch (e) {}
+      }
+    });
     view().innerHTML = `
       <div class="lv-top">
         <button class="sr-back" data-f tabindex="-1" title="返回首页" id="lv-back">←</button>
@@ -915,12 +1213,40 @@ const App = (() => {
     }
     tl.innerHTML = '';
     slots.forEach(s => {
+      const act = s.now ? '' : (s.past ? '<span class="e-act">回看</span>' : '<span class="e-act">' + (Live.hasReminder(ch.name, s.it.start) ? '已预约·取消' : '预约') + '</span>');
       const slot = UI.el(`<div class="e-slot${s.now ? ' now' : ''}${s.past ? ' past' : ''}" data-f tabindex="-1">
         ${s.now ? '<span class="e-live">LIVE</span>' : ''}
         <div class="e-t">${escHtml(s.it.start)} – ${escHtml(s.it.end)}</div>
         <div class="e-n">${escHtml(s.it.title)}</div>
-        ${s.now ? `<div class="e-p"><i style="width:${s.prog.toFixed(0)}%"></i></div>` : ''}
+        ${s.now ? `<div class="e-p"><i style="width:${s.prog.toFixed(0)}%"></i></div>` : act}
       </div>`);
+      slot.onclick = () => {
+        const group = lvCur && lvCur.ch === ch ? lvCur.group : null;
+        if (s.now || s.past) {
+          /* 回看:把起止时间按 playseek 模板拼进各线路地址 */
+          if (!group) { toast('请先选中该频道'); return; }
+          const base = (ch.urls && ch.urls.length ? ch.urls : [ch.url]);
+          const cu = {
+            name: ch.name, group: ch.group || '',
+            url: Live.catchupUrl(base[0], s.it.start, s.it.end),
+            urls: base.map(u => Live.catchupUrl(u, s.it.start, s.it.end)),
+          };
+          toast('尝试回看 ' + s.it.start + ' ' + s.it.title + '(若源不支持回看将黑屏/报错)');
+          playLive(cu, group, 0);
+        } else {
+          /* 预约:未来节目,到点提醒 */
+          const [hh, mm] = s.it.start.split(':').map(Number);
+          const d = new Date(); d.setHours(hh, mm, 0, 0);
+          if (Live.hasReminder(ch.name, s.it.start)) {
+            Live.removeReminder(ch.name, s.it.start);
+            toast('已取消预约:' + s.it.title);
+          } else {
+            Live.addReminder({ chName: ch.name, groupName: group ? group.name : '', title: s.it.title, start: s.it.start, fireAt: d.getTime() });
+            toast('已预约 ' + s.it.start + ' ' + s.it.title + ',到点提醒');
+          }
+          lvRenderEpgTimeline(ch, epg);   // 刷新按钮状态
+        }
+      };
       tl.appendChild(slot);
     });
     /* OSD 同步 */
@@ -1386,7 +1712,7 @@ const App = (() => {
     for (let i = 0; i < 2; i++) worker();
   }
 
-  function pageDrive() {
+  async function pageDrive() {
     const drives = DB.getDrives();
     view().innerHTML = `
       <div class="page-title">网盘 <span class="sub">WebDAV / SMB / Alist / 云盘 · 本地U盘即插即播</span></div>
@@ -1420,7 +1746,15 @@ const App = (() => {
     };
     // 云盘账号(阿里扫码/夸克Cookie)也作为驱动出现;驱动以卡片呈现(本地U盘永远可用)
     const clouds = (window.Cloud ? Cloud.list() : []).map((c, i) => ({ id: 'cloud' + i, name: c.name + ' · 云盘', cloud: c }));
-    const all = clouds.concat(drives);
+    /* U盘/本地存储卷:App 内由 MiniServer /usb/vols 提供,检测到已挂载卷才出现卡片(即插即播) */
+    const usbDrives = [];
+    if (API.IN_APP) {
+      try {
+        const r = await fetch('http://127.0.0.1:9978/usb/vols').then(x => x.json());
+        (r.vols || []).forEach(v => usbDrives.push({ id: '__usb|' + v.path, name: v.name, type: 'usb', url: v.path }));
+      } catch (e) { /* 桌面浏览器无该端点,忽略 */ }
+    }
+    const all = clouds.concat(drives).concat(usbDrives);
     if (!driveState.driveId || !all.find(d => d.id === driveState.driveId)) driveState.driveId = all.length ? all[0].id : null;
     const cards = view().querySelector('#drv-cards');
     const mkCard = (ico, name, type, active, onclick) => {
@@ -1430,7 +1764,7 @@ const App = (() => {
     };
     mkCard(I_SET.usb, '本地 / U盘', '即插即播', false, () => view().querySelector('#local-file').click());
     all.forEach(d => {
-      const type = d.cloud ? '云盘账号' : ({ alist: 'Alist', webdav: 'WebDAV', smb: 'SMB 共享' }[d.type] || d.type);
+      const type = d.cloud ? '云盘账号' : ({ alist: 'Alist', webdav: 'WebDAV', smb: 'SMB 共享', usb: 'U盘/存储' }[d.type] || d.type);
       mkCard(d.cloud ? I_SET.cloud4k : I_SET.hd, d.name, type, d.id === driveState.driveId, () => { driveState.driveId = d.id; driveState.path = '/'; driveState.fid = null; pageDrive(); });
     });
     if (!all.length) {
@@ -1562,7 +1896,13 @@ const App = (() => {
     box.innerHTML = UI.spinner();
     try {
       let list;
-      if (API.IN_APP && drive.type === 'smb') throw new Error('SMB 需在电脑端(桌面版/浏览器)使用');
+      if (drive.type === 'usb') {
+        /* U盘/本地存储:MiniServer 直接列目录(sub 为绝对路径;根目录/异常路径回退到卷根) */
+        const dir = (sub && sub.startsWith('/') && sub.startsWith(drive.url)) ? sub : drive.url;
+        const r = await fetch('http://127.0.0.1:9978/usb/list?p=' + encodeURIComponent(dir)).then(x => x.json());
+        if (r.error) throw new Error(r.error);
+        list = r.list;
+      } else if (API.IN_APP && drive.type === 'smb') throw new Error('SMB 需在电脑端(桌面版/浏览器)使用');
       if (API.IN_APP) {
         list = await API.listDriveDirect(drive, sub);          // App:JS 直连
       } else if (drive.type === 'smb') {
@@ -1745,6 +2085,10 @@ const App = (() => {
   function davFileUrl(drive, item, base) {
     let url;
     const filePath = item.path.indexOf('/') === 0 ? item.path : base.replace(/\/$/, '') + '/' + item.name;
+    if (drive.type === 'usb') {
+      /* U盘/本地文件:MiniServer 流式输出(Range 可拖动);item.path 为绝对路径 */
+      return 'http://127.0.0.1:9978/usb/get?p=' + encodeURIComponent(item.path.indexOf('/') === 0 ? item.path : base.replace(/\/$/, '') + '/' + item.name);
+    }
     if (API.IN_APP) {
       if (drive.type === 'alist') url = drive.url + '/d' + filePath;
       else url = drive.url + filePath;
@@ -1878,12 +2222,14 @@ const App = (() => {
           <div class="sec-head"><span class="sec-ico">${I_SET.tune}</span>播放与搜索</div>
           <div class="set-rows">
             <div class="set-row"><div class="set-txt"><b>自动换源</b><span>播放失败时自动尝试其他源同名影片,最多3次</span></div><input type="checkbox" class="sw" id="cfg-autoswitch" data-f tabindex="-1" ${cfg.autoSwitch ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>默认画质 / 优先线路</b><span>播放时自动选 1080P/4K/蓝光 播放组(按组名匹配),无对应组则沿用第 1 线路</span></div><select id="cfg-preferq" data-f tabindex="-1"><option value="default">默认线路(第 1 个)</option><option value="1080">优先 1080P</option><option value="4k">优先 4K</option><option value="bluray">优先蓝光 / 原盘</option></select></div>
             <div class="set-row"><div class="set-txt"><b>代理模式</b><span>经本地服务器转发,解决跨域/防盗链</span></div><input type="checkbox" class="sw" id="cfg-proxy" data-f tabindex="-1" ${cfg.proxyMode ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>全网搜索并发数</b><span>同时请求的源数量(1-12)</span></div><input type="number" id="cfg-pool" data-f tabindex="-1" min="1" max="12" value="${cfg.multiSearch}"></div>
             <div class="set-row"><div class="set-txt"><b>自动跳过片头</b><span>播放时默认跳过;按影片精确标记在播放器⚙里</span></div><input type="checkbox" class="sw" id="cfg-skipintro" data-f tabindex="-1" ${cfg.skipIntroAuto ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>默认片头时长</b><span>秒(0-600)</span></div><input type="number" id="cfg-intro" data-f tabindex="-1" min="0" max="600" value="${cfg.defaultIntroSec}"></div>
             <div class="set-row"><div class="set-txt"><b>M3U8 广告过滤</b><span>自动剔除贴片/插入广告切片</span></div><input type="checkbox" class="sw" id="cfg-adfilter" data-f tabindex="-1" ${cfg.adFilter !== false ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>智能嗅探直连</b><span>捕获网页直链后自动择优播放</span></div><input type="checkbox" class="sw" id="cfg-sniffauto" data-f tabindex="-1" ${cfg.sniffAuto !== false ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>遥控输入自动弹键盘</b><span>方向键移到输入框时自动弹出屏幕键盘(方向键选字、Enter 输入、Esc 收起)</span></div><input type="checkbox" class="sw" id="cfg-osk" data-f tabindex="-1" ${cfg.autoKeyboard !== false ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>网盘海报墙刮削</b><span>豆瓣:评分/海报/简介/演员表</span></div><input type="checkbox" class="sw" id="cfg-scrape" data-f tabindex="-1" ${cfg.scrapeOn !== false ? 'checked' : ''}></div>
           </div>
         </section>
@@ -1894,6 +2240,10 @@ const App = (() => {
             <input id="repo-name" data-f tabindex="-1" placeholder="备注名(可空)">
             <input id="repo-url" data-f tabindex="-1" placeholder="仓库地址:TVBox 配置 JSON(http:// 或本地 file 导入用下方粘贴)">
             <button class="btn primary" id="repo-add" data-f tabindex="-1">订阅</button>
+          </div>
+          <div class="form" style="margin-top:8px">
+            <button class="btn primary" id="preset-1080" data-f tabindex="-1">📥 一键导入 1080P 精选采集源(8个实测可用)</button>
+            <button class="btn" id="preset-repo-xhz" data-f tabindex="-1">🗂️ 订阅多仓:小盒子</button>
           </div>
           <div class="form" style="margin-top:10px">
             <textarea id="repo-text" data-f tabindex="-1" placeholder="…或直接粘贴 TVBox 配置 JSON 文本(支持单仓 sites / 多仓 urls / storeHouse)"></textarea>
@@ -2053,7 +2403,7 @@ const App = (() => {
     });
   }
 
-  function applyRepoResult(result, repoName, repoUrl, repoId, silent) {
+  function applyRepoResult(result, repoName, repoUrl, repoId, silent, fromPaste) {
     if (result.type === 'multi') {
       // 多仓:列出子仓供选择,全部一键导入
       const mask = UI.el(`<div class="modal-mask">
@@ -2083,7 +2433,16 @@ const App = (() => {
       return;
     }
     if (result.type !== 'sites') {
-      if (!silent) toastErr('无法解析:不是有效的 TVBox 配置(未找到 sites/urls/storeHouse)');
+      if (!silent) {
+        const why =
+          result.reason === 'html' ? (fromPaste ? '粘贴的内容是网页源码,不是配置 JSON' : '这个地址返回的是网页(域名失效/被运营商拦截),不是 TVBox 配置') :
+          result.reason === 'empty' ? '返回内容是空的' :
+          result.reason === 'net' ? '网络请求失败:' + (result.detail || '源不可达') :
+          result.reason === 'urls-empty' ? '配置里 urls / storeHouse 没有可用的 http 地址' :
+          result.reason === 'shape' ? '配置里没有 sites / urls / storeHouse(实际字段:' + ((result.keys || []).join('、') || '无') + ')' :
+          '返回内容不是 JSON';
+        toast('无法解析:' + why + (fromPaste ? '' : ' —— 换个仓库地址,或把配置 JSON 粘贴到下面「解析粘贴内容」'), 'err', 7000);
+      }
       return;
     }
     let rid = repoId;
@@ -2123,6 +2482,24 @@ const App = (() => {
   }
 
   function bindSettingsActions(cfg) {
+    /* 1080P 精选采集源(2026-10-26 实测连通+逐源拉 m3u8 查广告后精选);
+       已剔除实测混插广告片段的源:量子(/20261003 外路广告x7)、暴风(/video/adjump/ x9)、360(外源广告x8)、极速(接口超时且返回播放器页无法验证)。
+       保留 4 源正片单一 host+单一 path,无广告片段;配合「默认画质优先1080P」设置食用 */
+    const PRESET_1080 = [
+      { name: '非凡资源(1080P)', api: 'https://api.ffzyapi.com/api.php/provide/vod/' },
+      { name: '红牛资源(1080P)', api: 'https://hongniuzy2.com/api.php/provide/vod/' },
+      { name: '豪华资源(1080P)', api: 'https://hhzyapi.com/api.php/provide/vod/' },
+      { name: '电影天堂(1080P)', api: 'http://caiji.dyttzyapi.com/api.php/provide/vod/' },
+    ];
+    view().querySelector('#preset-1080').onclick = () => {
+      let added = 0, dup = 0;
+      PRESET_1080.forEach(p => { const r = DB.addSource(p.name, p.api, { originName: '1080P精选' }); r.ok ? added++ : dup++; });
+      renderTabs();
+      if (document.querySelector('.settings')) pageSet();
+      toast(`1080P 精选源导入完成:新增 ${added} 个` + (dup ? `,已存在 ${dup} 个` : ''));
+    };
+    view().querySelector('#preset-repo-xhz').onclick = () => importRepoSites('http://xhztv.top/dc/', '小盒子多仓', null, false);
+
     view().querySelector('#src-add').onclick = () => {
       const name = view().querySelector('#src-name').value.trim();
       const api = view().querySelector('#src-api').value.trim();
@@ -2141,7 +2518,7 @@ const App = (() => {
     view().querySelector('#repo-parse').onclick = () => {
       const text = view().querySelector('#repo-text').value.trim();
       if (!text) { toastErr('请粘贴配置 JSON'); return; }
-      applyRepoResult(API.parseRepoConfig(text, location.origin), '粘贴导入', null, null, false);
+      applyRepoResult(API.parseRepoConfig(text, location.origin), '粘贴导入', null, null, false, true);
     };
 
     /* 手机扫码推送配置:弹二维码 → 轮询 /cfg/get → 自动导入 */
@@ -2208,11 +2585,21 @@ const App = (() => {
     view().querySelector('#cfg-proxy').onchange = e => { DB.setConfig({ proxyMode: e.target.checked }); toast(e.target.checked ? '已开启代理模式' : '已关闭代理模式'); };
     view().querySelector('#cfg-autoswitch').onchange = e => { DB.setConfig({ autoSwitch: e.target.checked }); toast(e.target.checked ? '已开启自动换源' : '已关闭自动换源'); };
     view().querySelector('#cfg-pool').onchange = e => { DB.setConfig({ multiSearch: Math.min(12, Math.max(1, Number(e.target.value) || 6)) }); toast('并发数已更新'); };
+    const preferSel = view().querySelector('#cfg-preferq');
+    if (preferSel) {
+      preferSel.value = (DB.getConfig().preferQuality) || '1080';
+      preferSel.onchange = e => { DB.setConfig({ preferQuality: e.target.value }); toast('默认画质已设为:' + e.target.selectedOptions[0].textContent.trim()); };
+    }
     view().querySelector('#cfg-skipintro').onchange = e => { DB.setConfig({ skipIntroAuto: e.target.checked }); toast(e.target.checked ? '已开启自动跳过片头' : '已关闭自动跳过片头'); };
     view().querySelector('#cfg-intro').onchange = e => { DB.setConfig({ defaultIntroSec: Math.min(600, Math.max(0, Number(e.target.value) || 0)) }); toast('默认片头时长已更新'); };
     view().querySelector('#cfg-adfilter').onchange = e => { DB.setConfig({ adFilter: e.target.checked }); toast(e.target.checked ? '已开启广告切片过滤' : '已关闭广告切片过滤'); };
     view().querySelector('#cfg-sniffauto').onchange = e => { DB.setConfig({ sniffAuto: e.target.checked }); toast(e.target.checked ? '已开启嗅探自动直连' : '已关闭嗅探自动直连'); };
     view().querySelector('#cfg-scrape').onchange = e => { DB.setConfig({ scrapeOn: e.target.checked }); toast(e.target.checked ? '已开启刮削' : '已关闭刮削'); };
+    view().querySelector('#cfg-osk').onchange = e => {
+      DB.setConfig({ autoKeyboard: e.target.checked });
+      if (!e.target.checked && window.OSK) OSK.close(false);
+      toast(e.target.checked ? '已开启:遥控到输入框自动弹键盘' : '已关闭自动弹键盘(可用手机遥控/系统输入法)');
+    };
 
     /* 弹幕接口配置 */
     const dmTpl = view().querySelector('#dm-tpl');
@@ -2352,6 +2739,8 @@ const App = (() => {
   /* ============ 详情页 ============ */
   async function goDetail(item) {
     const src = DB.getCurrentSource();
+    if (subPage !== 'detail') subFrom = tab;
+    subPage = 'detail';
     view().innerHTML = `<div class="detail"><div class="backdrop" style="background-image:url('${item.pic}')"></div>${UI.spinner()}</div>`;
     KeyNav.focusFirst();
 
@@ -2383,6 +2772,7 @@ const App = (() => {
     view().innerHTML = '';
     const page = UI.el(`<div class="detail">
       <div class="backdrop" style="background-image:url('${d.pic}')"></div>
+      <button class="detail-back" id="detail-back" data-f tabindex="-1" title="返回上一级">←</button>
       <div class="detail-head">
         <img class="detail-poster" src="${d.pic || window.IMG_FB}" ${IMG_ERR}>
         <div class="detail-info">
@@ -2402,8 +2792,9 @@ const App = (() => {
 
     fillInfoPanel(page.querySelector('#info-panel'), d.name, d.year, d.content);
 
+    page.querySelector('#detail-back').onclick = () => goBack();
     const btnPlay = page.querySelector('#btn-play');
-    btnPlay.onclick = () => playVod(src, d, groups, hist ? hist.epIndex : 0, hist ? hist.position : 0);
+    btnPlay.onclick = () => playVod(src, d, groups, 'prefer', hist ? hist.position : 0, hist ? hist.epIndex : 0);
     const btnFav = page.querySelector('#btn-fav');
     btnFav.onclick = () => {
       const added = DB.toggleFav({ key, name: d.name, pic: d.pic, sourceId: src.id, vodId: d.id });
@@ -2411,7 +2802,7 @@ const App = (() => {
       toast(added ? '已加入收藏' : '已取消收藏');
     };
     const btnRestart = page.querySelector('#btn-restart');
-    if (btnRestart) btnRestart.onclick = () => playVod(src, d, groups, hist.epIndex, 0);
+    if (btnRestart) btnRestart.onclick = () => playVod(src, d, groups, 'prefer', 0, 0);
 
     renderEpisodeGroups(page, groups, { key, name: d.name, pic: d.pic, sourceId: src.id, vodId: d.id, fromName: d.from ? d.from.name : '', title: d.name }, hist);
     KeyNav.focusFirst(page.querySelector('.detail-actions'));
@@ -2517,16 +2908,38 @@ const App = (() => {
     area.appendChild(sec);
   }
 
+  /* 按「默认画质/优先线路」偏好挑一个播放组:先精确匹配目标画质,无则向上(4K/蓝光)兜底,都没有则第 1 线路 */
+  function preferGroupIndex(groups, pref) {
+    if (!groups || !groups.length) return 0;
+    if (!pref || pref === 'default') return 0;
+    const KW = {
+      '1080':   [['1080', '高清', 'hd'], ['4k', '2160', '蓝光', 'remux', 'bluray']],
+      '4k':     [['4k', '2160'], ['蓝光', 'remux', 'bluray']],
+      'bluray': [['蓝光', 'remux', 'bluray'], ['4k', '2160']],
+    };
+    const tiers = KW[pref];
+    if (!tiers) return 0;
+    const hit = (g, tier) => tier.some(k => String(g.name || '').toLowerCase().includes(k));
+    for (const tier of tiers) {
+      const idx = groups.findIndex(g => hit(g, tier));
+      if (idx >= 0) return idx;
+    }
+    return 0;
+  }
+
   /* ============ 播放入口 ============ */
   function playVod(src, d, groups, gi = 0, fromPosition = 0, forceEi = null, tried = []) {
     if (!groups.length) { toastErr('没有可播放的地址'); return; }
+    const pref = (DB.getConfig().preferQuality) || 'default';
+    let giResolved = (gi === 'prefer') ? preferGroupIndex(groups, pref) : (typeof gi === 'number' && !isNaN(gi) ? gi : 0);
+    giResolved = Math.max(0, Math.min(giResolved, groups.length - 1));
     const hist = DB.getHist(src.id + '|' + d.id);
     const ei = forceEi !== null ? forceEi : (hist ? hist.epIndex : 0);
-    const g = groups[Math.min(gi, groups.length - 1)];
+    const g = groups[giResolved];
     const ep = g.eps[Math.min(ei, g.eps.length - 1)];
     DB.saveHist({
       key: src.id + '|' + d.id, name: d.name, pic: d.pic || '', from: d.from ? d.from.name : '',
-      epIndex: ei, epName: ep.name, position: fromPosition || (hist && forceEi === null ? hist.position : 0), duration: 0,
+      epIndex: ei, epName: ep.name, position: fromPosition || (hist && forceEi === null ? hist.position : 0), duration: 0, groupIndex: giResolved,
       sourceId: src.id, vodId: d.id,
     });
     Player.open({
@@ -2538,7 +2951,7 @@ const App = (() => {
       vodId: d.id,
       fromName: d.from ? d.from.name : '',
       groups,
-      groupIndex: Math.min(gi, groups.length - 1),
+      groupIndex: giResolved,
       epIndex: Math.min(ei, g.eps.length - 1),
       tried: tried.slice(),
       onFindSources: () => API.findEverywhere(d.name, src.id),
@@ -2561,7 +2974,7 @@ const App = (() => {
       if (!d) throw new Error('详情不存在');
       const groups = API.parsePlay(d.raw);
       if (!groups.length) throw new Error('该源无播放地址');
-      playVod(src, d, groups, 0, 0, epIdx || 0, (prevTried || []).concat());
+      playVod(src, d, groups, 'prefer', 0, epIdx || 0, (prevTried || []).concat());
     } catch (e) {
       toastErr('换源失败:' + (e.message || e));
     }
@@ -2576,7 +2989,7 @@ const App = (() => {
       if (!d) throw new Error('详情不存在,源可能已失效');
       const groups = API.parsePlay(d.raw);
       if (!groups.length) throw new Error('该片暂无播放地址');
-      playVod(src, d, groups, 0, h.position || 0);
+      playVod(src, d, groups, (h.groupIndex != null ? h.groupIndex : 'prefer'), h.position || 0, h.epIndex || 0);
     } catch (e) {
       toastErr(e.message || e);
       pageHome();
@@ -2590,14 +3003,46 @@ const App = (() => {
   }
 
   /* ============ 全局按键:返回 ============ */
+  /* 返回上一级:软键盘 → 播放器 → 弹窗 → 二级页(详情/分类)→ 首页 */
+  function goBack() {
+    if (window.OSK && OSK.isOpen()) { OSK.close(); return true; }
+    if (Player.isOpen()) { Player.close(); return true; }
+    const mask = document.querySelector('.modal-mask');
+    if (mask) {
+      const x = mask.querySelector('.modal-head .x') || mask.querySelector('.x');
+      if (x) { x.click(); return true; }
+      return false;
+    }
+    if (subPage) { const t = subFrom || 'home'; subPage = null; go(t); return true; }
+    if (tab !== 'home') { go('home'); return true; }
+    return false;
+  }
+  /* 安卓遥控器的「返回」键由 MainActivity 调这里:返回 1=网页已处理,0=可以退出应用 */
+  window.__onBack = function () { try { return goBack() ? 1 : 0; } catch (e) { return 0; } };
+  /* U盘/存储插拔:原生广播回调 → 提示 + 若在网盘页则刷新卷列表(即插即播) */
+  window.__onUsb = function (mounted) {
+    try {
+      if (window.toast) toast(mounted ? '检测到U盘/存储已挂载,可在「网盘」页浏览' : 'U盘/存储已移除');
+      if (document.querySelector('#drive-area')) pageDrive();
+    } catch (e) {}
+  };
+
   document.addEventListener('keydown', e => {
     if (Player.isOpen()) return;
     if (e.key === 'Backspace' || e.key === 'Escape') {
-      // 输入框里不拦截(输入框自身的退格)
       const ae = document.activeElement;
-      if (e.key === 'Backspace' && ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+      const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+      // 输入框内:退格删字、Esc 先清空并失焦(再按一次才返回),不直接退出页面
+      if (e.key === 'Backspace' && inInput) return;
+      if (e.key === 'Escape' && inInput) {
+        if (document.querySelector('.modal-mask')) return; // 弹窗内交给弹窗处理
+        e.preventDefault();
+        if (ae.value) { ae.value = ''; ae.dispatchEvent(new Event('input', { bubbles: true })); }
+        else ae.blur();
+        return;
+      }
       if (document.querySelector('.modal-mask')) return; // 弹窗自己处理
-      if (tab !== 'home') { e.preventDefault(); go('home'); }
+      if (goBack()) e.preventDefault();
     }
   });
 

@@ -104,7 +104,7 @@ function requestUpstream(target, range, auth, extraHeaders) {
  * 可选参数:a=<base64 user:pass>(Basic 认证)、h=<encodeURIComponent('头: 值')>(自定义头)
  */
 function parseProxyTarget(req, u) {
-  for (const prefix of ['/proxy/', '/proxy2/', '/sniff/']) {
+  for (const prefix of ['/proxy/', '/proxy2/', '/sniff/', '/sniff2/']) {
     if (u.pathname.startsWith(prefix)) {
       let t = u.pathname.slice(prefix.length);
       try { t = decodeURIComponent(t); } catch {}
@@ -118,7 +118,7 @@ function parseProxyTarget(req, u) {
       return t;
     }
   }
-  if (['/proxy', '/proxy/', '/proxy2', '/proxy2/', '/sniff', '/sniff/'].includes(u.pathname)) {
+  if (['/proxy', '/proxy/', '/proxy2', '/proxy2/', '/sniff', '/sniff/', '/sniff2'].includes(u.pathname)) {
     return u.searchParams.get('u');
   }
   return null;
@@ -570,6 +570,112 @@ function transformSniffHtml(body) {
   return SNIFF_HOOK + body;
 }
 
+/* ---------- 直链提取:/sniff2/<url> ----------
+ * 采集源的 play_url 常是 HTML 分享页(/share/xxx、/play/xxx),
+ * 真正的视频地址藏在页面 JS 里(常见:var main = "/2026.../index.m3u8?sign=..")。
+ * 服务端抓页面 → 正则抽候选 → 逐个探测是否真媒体 → 返回 JSON 直链。
+ * 与 android/MiniServer.java 的同名端点行为一致。
+ */
+function collectMediaCandidates(html, baseUrl) {
+  const out = [];
+  const h = String(html || '').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+  const push = (raw) => {
+    if (!raw) return;
+    let s = String(raw).trim();
+    if (!s) return;
+    if (s.startsWith('//')) s = 'https:' + s;
+    else if (!/^https?:\/\//i.test(s)) {
+      try { s = new URL(s, baseUrl).href; } catch { return; }
+    }
+    if (!/\.m3u8(\?|$)/i.test(s) && !/\.mp4(\?|$)/i.test(s)) return;
+    if (!out.includes(s)) out.push(s);
+  };
+  let m;
+  const reVar = /(?:main|video_url|videourl|m3u8_url|m3u8url|url|file|src|play_url|playurl|src_url|hls)\s*[:=]\s*["']([^"'<>\s]{6,400})["']/gi;
+  while ((m = reVar.exec(h))) push(m[1]);
+  const reM3u8 = /["']([^"'<>\s]{0,400}\.m3u8[^"'<>\s]{0,200})["']/gi;
+  while ((m = reM3u8.exec(h))) push(m[1]);
+  const reMp4 = /["']([^"'<>\s]{0,400}\.mp4[^"'<>\s]{0,120})["']/gi;
+  while ((m = reMp4.exec(h))) push(m[1]);
+  return out;
+}
+
+function probeMedia(url, ref) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(url); } catch { return resolve(false); }
+    const mod = u.protocol === 'http:' ? http : https;
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0', 'accept': '*/*', 'accept-encoding': 'identity', range: 'bytes=0-2047' };
+    if (ref) headers.referer = ref;
+    const req = mod.request(u, { headers, timeout: 12000 }, (res) => {
+      const ct = String(res.headers['content-type'] || '').toLowerCase();
+      if (ct.includes('mpegurl') || ct.includes('video/mp4')) { res.resume(); return resolve(true); }
+      let buf = '';
+      res.on('data', (c) => { buf += c.toString('utf8', 0, 16); if (buf.length > 16) res.destroy(); });
+      res.on('end', () => resolve(buf.startsWith('#EXTM3U')));
+      res.on('close', () => resolve(buf.startsWith('#EXTM3U')));
+      res.on('error', () => resolve(false));
+    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
+async function handleSniff2(req, res, u) {
+  let target = parseProxyTarget(req, u);
+  /* base64url 参数:?b=<base64url> 传目标 URL(避开 %2F 被浏览器丢弃) */
+  if (!target) {
+    const b = u.searchParams.get('b');
+    if (b) {
+      try { target = Buffer.from(b, 'base64url').toString('utf8'); } catch { target = ''; }
+    }
+  }
+  if (!target || !/^https?:\/\//i.test(target)) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({ ok: false, error: 'bad url' }));
+  }
+  const ref = u.searchParams.get('ref') || '';
+  try {
+    let finalUrl = target;
+    let ctype = '';
+    let body = '';
+    for (let hop = 0; hop < 5; hop++) {
+      const up = await requestUpstream(finalUrl, null, null, ref ? { referer: ref } : null);
+      const loc = up.headers.location;
+      if (loc && [301, 302, 303, 307, 308].includes(up.status) && hop < 4) {
+        up.stream.resume();
+        try { finalUrl = new URL(loc, finalUrl).href; } catch { break; }
+        continue;
+      }
+      ctype = String(up.headers['content-type'] || '').toLowerCase();
+      const chunks = [];
+      let size = 0;
+      for await (const c of up.stream) { chunks.push(c); size += c.length; if (size > 3 * 1024 * 1024) break; }
+      body = Buffer.concat(chunks).toString('utf8');
+      break;
+    }
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (ctype.includes('mpegurl') || ctype.includes('video/mp4') || ctype.includes('x-mpegurl')) {
+      return send({ ok: true, direct: true, urls: [finalUrl] });
+    }
+    const cands = collectMediaCandidates(body, finalUrl);
+    const ok = [];
+    for (const c of cands) {
+      if (ok.length >= 5) break;
+      if (await probeMedia(c, ref)) ok.push(c);
+    }
+    if (!ok.length) return send({ ok: false, error: 'no media url found' });
+    return send({ ok: true, urls: ok, page: finalUrl });
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+  }
+}
+
 /* ---------- 静态文件(支持 Range,媒体可拖动进度条) ---------- */
 function handleStatic(req, res) {
   let p = decodeURIComponent((req.url || '/').split('?')[0]);
@@ -876,7 +982,7 @@ const ALI_OPEN = 'https://openapi.aliyundrive.com';
 const UA_PC = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 function jout(res, code, obj) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
 }
 
@@ -1010,6 +1116,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return fs.createReadStream(path.join(ROOT, 'remote.html')).pipe(res);
   }
+  if (u.pathname === '/sniff2' || u.pathname.startsWith('/sniff2/')) return handleSniff2(req, res, u);
   if (u.pathname === '/proxy' || u.pathname.startsWith('/proxy/') || u.pathname === '/proxy2' || u.pathname.startsWith('/proxy2/') || u.pathname.startsWith('/sniff/')) return handleProxy(req, res, u);
   if (u.pathname === '/webdav') return handleWebdav(req, res, u);
   if (u.pathname === '/alist') return handleAlistProxy(req, res, u);

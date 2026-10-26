@@ -13,6 +13,51 @@
   --focus-ring: 0 0 0 3px rgba(245, 245, 247, .9), 0 10px 30px rgba(0, 0, 0, .6);
 }
 
+/* ============ 大屏 / 4K 适配 ============
+ * 命中条件:逻辑宽度 ≥2200px(如 4K 不缩放),或 高 DPI 且 ≥1920px(如 4K 200% 缩放,逻辑 1920/DPR2)。
+ * 放大根字号、焦点环、卡片与控件,远处沙发观看更清晰;#view 取消 1920 上限,铺满整屏。 */
+@media (min-width: 2200px), (min-resolution: 2dppx) and (min-width: 1920px) {
+  :root {
+    font-size: 20px;
+    --radius: 16px;
+    --focus-ring: 0 0 0 4px rgba(245, 245, 247, .95), 0 14px 40px rgba(0, 0, 0, .65);
+  }
+  #view { max-width: none; padding: 0 48px 56px; }
+  #topbar { padding: 16px 48px 12px; gap: 22px; }
+  .logo, .icon-btn { width: 54px; height: 54px; font-size: 22px; }
+  .tab { font-size: 18px; padding: 14px 32px; }
+  .chip { height: 52px; font-size: 16px; padding: 0 22px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 20px 16px; }
+  .card .title { font-size: 15px; }
+  .card .sub { font-size: 12.5px; }
+  .hcard { width: 220px; }
+  .hname { font-size: 15px; }
+  .hmeta { font-size: 13px; }
+  .detail-info h1 { font-size: 38px; }
+  .page-title { font-size: 28px; }
+  .page-title .sub { font-size: 16px; }
+  /* 播放器控件在 4K 下同步放大 */
+  .pl-title .t-name { font-size: 24px; }
+  .pl-title .t-ep { font-size: 16px; }
+  .pl-time { font-size: 17px; }
+  .pl-ctrls .pc-play { width: 76px; height: 76px; }
+  .pl-ctrls .pc-wide { height: 56px; padding: 0 26px; }
+  .pl-ctrls .pc-wide span { font-size: 18px; }
+  .pl-track .fill .thumb { width: 18px; height: 18px; }
+  .pl-drawer { width: min(440px, 92vw); }
+  .pl-drawer .ep { height: 46px; font-size: 15px; }
+  /* 软键盘 */
+  .osk-k { height: 58px; font-size: 22px; }
+  .osk-k.osk-act { font-size: 18px; }
+  .osk-head { font-size: 15px; }
+  .osk-head .osk-hint { font-size: 14px; }
+  body.osk-on #view { padding-bottom: 420px; }
+  /* 弹窗/通用控件 */
+  .modal { width: min(840px, 92vw); }
+  .modal-head { font-size: 22px; }
+  .btn, .ep, .cat { font-size: 16px; }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   color: var(--text);
@@ -97,6 +142,22 @@ button, [data-f] { outline: none; }
 .cat:hover { background: rgba(255, 255, 255, .13); transform: translateY(-1px); }
 .cat.active { background: #fff; color: #000; }
 .cat:focus { box-shadow: var(--focus-ring); }
+
+/* ============ 分类多重筛选器(类型/地区/年份) ============ */
+.filter-bar { margin: 2px 0 16px; display: flex; flex-direction: column; gap: 4px; }
+.filter-group { display: flex; align-items: center; gap: 10px; }
+.filter-group .fgroup-head { flex: none; width: 38px; color: var(--muted); font-size: 14px; font-weight: 700; }
+.filter-group .cat-row { flex: 1; margin: 0; padding: 2px 0 4px; }
+.filter-group .fchips { flex-wrap: wrap; overflow: visible; }
+.chip-n { opacity: .55; font-size: 11px; font-weight: 500; margin-left: 2px; }
+.filter-clear { background: rgba(255, 90, 90, .16); color: #ff9c9c; }
+.filter-clear:hover { background: rgba(255, 90, 90, .26); transform: translateY(-1px); }
+.cat-foot { display: flex; align-items: center; gap: 14px; padding: 10px 2px 2px; flex-wrap: wrap; }
+.filter-cnt { color: var(--muted); font-size: 13px; }
+@media (max-width: 560px) {
+  .filter-group { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .filter-group .fgroup-head { width: auto; }
+}
 
 /* ============ 海报卡片(无边框纯海报) ============ */
 .grid { display: grid; gap: 14px 11px; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); }
@@ -1362,6 +1423,9 @@ button, [data-f] { outline: none; }
 .e-slot .e-p i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent); }
 .e-slot .e-live { position: absolute; right: 10px; top: 10px; font-size: 10px; font-weight: 800; color: var(--accent); letter-spacing: 1px; }
 .e-slot.past { opacity: .45; }
+.e-slot { cursor: pointer; }
+.e-slot .e-act { position: absolute; right: 10px; top: 10px; font-size: 10.5px; font-weight: 700; color: var(--muted); border: 1px solid var(--muted); border-radius: 999px; padding: 1px 8px; }
+.e-slot.past .e-act { color: var(--accent); border-color: var(--accent); opacity: 1; }
 /* 右:频道列表 */
 .lv-chans { width: 340px; flex: none; }
 .lv-chans .c-h { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; }
@@ -1513,3 +1577,84 @@ button, [data-f] { outline: none; }
   .tp-btn.tp-play { width: 54px; height: 54px; }
   .pl-seekprev { width: 180px; bottom: 132px; }
 }
+
+/* ============ 遥控软键盘(方向键移到输入框时自动弹出) ============ */
+.osk {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 320;
+  padding: 10px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, rgba(20, 20, 22, .93), rgba(8, 8, 10, .99));
+  border-top: 1px solid rgba(255, 255, 255, .1);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 -18px 50px rgba(0, 0, 0, .7);
+  transform: translateY(112%); opacity: 0; pointer-events: none;
+  transition: transform .22s var(--ease, ease), opacity .22s var(--ease, ease);
+}
+.osk.on { transform: none; opacity: 1; pointer-events: auto; }
+.osk-head { display: flex; align-items: center; gap: 10px; padding: 0 3px 9px; font-size: 12.5px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }
+.osk-head .osk-t { color: var(--text); }
+.osk-head .osk-hint { font-weight: 400; letter-spacing: 0; opacity: .62; font-size: 12px; }
+.osk-head .osk-val {
+  margin-left: auto; color: var(--text); font-weight: 700; max-width: 62%;
+  padding: 3px 12px; border-radius: 999px; background: rgba(255, 255, 255, .07);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+}
+.osk-row { display: flex; gap: 7px; margin-bottom: 7px; }
+.osk-row:last-child { margin-bottom: 0; }
+.osk-k {
+  flex: 1 1 0; min-width: 0; height: 46px; border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, .09); background: #1c1c1e; color: var(--text);
+  font-family: inherit; font-size: 17px; font-weight: 600; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: transform .12s var(--ease, ease), background .12s, color .12s, box-shadow .12s;
+}
+.osk-k.osk-act { background: #2c2c2e; font-size: 14px; font-weight: 700; color: #e5e5ea; }
+.osk-k:focus { background: #fff; color: #000; transform: translateY(-2px) scale(1.03); box-shadow: var(--focus-ring); z-index: 2; }
+.osk-k.osk-act:focus { background: var(--accent); border-color: var(--accent); color: #000; }
+body.osk-on #view { padding-bottom: 340px; }
+/* 正在用软键盘编辑的输入框:即使焦点在键盘上也要看得出在改哪一格 */
+.osk-target { box-shadow: 0 0 0 2px var(--accent), 0 0 22px rgba(255, 179, 0, .35) !important; border-color: var(--accent) !important; background: #232326 !important; }
+@media (max-width: 900px) { .osk-head .osk-hint { display: none; } }
+@media (max-height: 620px) {
+  .osk-k { height: 38px; font-size: 15px; }
+  .osk-row { gap: 5px; margin-bottom: 5px; }
+  body.osk-on #view { padding-bottom: 270px; }
+}
+
+/* ============ 云盘登录(阿里扫码 / 夸克 Cookie) ============ */
+.ali-login { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.ali-qr-col { flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.ali-qr-col .ali-st { text-align: center; max-width: 288px; }
+.ali-qr {
+  width: 248px; height: 248px; flex: none; background: #fff; border-radius: 14px; padding: 10px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+}
+.ali-qr svg { width: 100%; height: 100%; display: block; }
+.ali-qr .hint { color: #555; }
+.ali-side { flex: 1 1 260px; min-width: 240px; }
+.ali-steps { font-size: 14.5px; line-height: 1.95; color: var(--text); }
+.ali-steps b { font-weight: 800; }
+.ali-st { margin-top: 10px; min-height: 22px; font-size: 13.5px; font-weight: 700; color: var(--accent); line-height: 1.6; }
+.ali-st.err { color: var(--danger); }
+.ali-st.ok { color: var(--green); }
+.ali-bar { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.ali-cd { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ali-alt {
+  margin-top: 14px; padding: 4px 0; background: none; border: none; color: var(--muted);
+  font-size: 12.5px; font-family: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.ali-alt:focus { color: var(--text); box-shadow: var(--focus-ring); border-radius: 6px; }
+@media (max-width: 760px) { .ali-qr { width: 200px; height: 200px; } }
+@media (min-width: 1280px) { .ali-qr { width: 288px; height: 288px; } }
+
+/* ============ 详情页返回按钮(遥控器只有一个返回键,详情页原来没有出口) ============ */
+.detail-back {
+  position: fixed; top: 74px; left: 22px; z-index: 60;
+  width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(255, 255, 255, .16); color: #fff; font-size: 20px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: background .15s, transform .15s;
+}
+.detail-back:hover { background: rgba(255, 255, 255, .28); }
+.detail-back:focus { background: #fff; color: #000; box-shadow: var(--focus-ring); transform: scale(1.06); }

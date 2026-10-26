@@ -6,6 +6,7 @@
  * ================================================= */
 const Player = (() => {
   let root = null, video = null, hls = null, iframe = null;
+  const sniffCache = {};   // 分享页 → 直链 的缓存(同一站点的多集共用一次解析)
   let state = null; // 当前播放状态
   let saveTimer = null, hideTimer = null;
   let lastPos = 0, lastDur = 0;
@@ -357,13 +358,14 @@ const Player = (() => {
     video.addEventListener('timeupdate', onTime);
     video.addEventListener('play', updatePlayBtn);
     video.addEventListener('playing', () => {
+      if (!root || !video) return;
       // 开始播放后清掉残留的失败提示
       const c = root.querySelector('.pl-center');
       if (c && c.textContent.includes('失败')) showCenter('');
     });
-    video.addEventListener('pause', () => { updatePlayBtn(); saveProgress(); });
+    video.addEventListener('pause', onPauseEv);
     window.addEventListener('beforeunload', saveProgress);
-    video.addEventListener('ended', () => switchEp(1));
+    video.addEventListener('ended', onEndedEv);
     // 点击画面:暂停/播放;双击:全屏(遥控器与鼠标用户的直觉操作)
     video.addEventListener('click', () => { togglePlay(); poke(); });
     video.addEventListener('dblclick', () => { toggleFs(); });
@@ -456,20 +458,40 @@ const Player = (() => {
     destroyEngine();
     try { spDestroy(); } catch (e) {}
 
-    const url = DB.getConfig().proxyMode ? API.proxied(ep.url) : ep.url;
-    const isIframe = /^https?:/i.test(ep.url) && !/\.(mp4|m3u8|mkv|webm)(\?|$)/i.test(ep.url) && !/\.mp4|m3u8/.test(ep.url);
-    const isHls = /\.m3u8(\?|$)/i.test(ep.url) || /m3u8/.test(ep.url);
-    const isFile = /\.(mp4|webm|mkv|mov)(\?|$)/i.test(ep.url);
+    let url = DB.getConfig().proxyMode ? API.proxied(ep.url) : ep.url;
+    let isIframe = /^https?:/i.test(ep.url) && !/\.(mp4|m3u8|mkv|webm)(\?|$)/i.test(ep.url) && !/\.mp4|m3u8/.test(ep.url);
+    let isHls = /\.m3u8(\?|$)/i.test(ep.url) || /m3u8/.test(ep.url);
+    let isFile = /\.(mp4|webm|mkv|mov)(\?|$)/i.test(ep.url);
 
     try {
       if (isIframe && !isFile && !isHls) {
-        // iframe 兜底(网页播放)
-        video.style.display = 'none';
-        iframe = el(`<iframe allow="autoplay; fullscreen; encrypted-media" referrerpolicy="no-referrer"></iframe>`);
-        iframe.src = url;
-        root.insertBefore(iframe, root.querySelector('.pl-top'));
-        showCenter('');
-        return;
+        /* 采集源给的常是 HTML 分享页(带广告),先让服务端把真直链抽出来;
+           抽到就走正常 HLS/MP4 播放,抽不到才退回 iframe 兜底 */
+        let direct = '';
+        try {
+          console.log('[player] sniff start', ep.url);
+          direct = sniffCache[ep.url] || '';
+          if (!direct) {
+            direct = await API.sniffResolve(ep.url);
+            if (direct) sniffCache[ep.url] = direct;
+          }
+          console.log('[player] sniff done', direct || '(none)');
+        } catch (_e) { console.log('[player] sniff err', (_e && _e.message) || _e); }
+        if (direct && /\.(m3u8|mp4)(\?|$)/i.test(direct)) {
+          url = DB.getConfig().proxyMode ? API.proxied(direct) : direct;
+          isHls = /\.m3u8(\?|$)/i.test(direct);
+          isFile = !isHls;
+          isIframe = false;
+          if (window.toast) toast('已解析出直链,正在播放');
+        } else {
+          // iframe 兜底(网页播放)
+          video.style.display = 'none';
+          iframe = el(`<iframe allow="autoplay; fullscreen; encrypted-media" referrerpolicy="no-referrer"></iframe>`);
+          iframe.src = url;
+          root.insertBefore(iframe, root.querySelector('.pl-top'));
+          showCenter('');
+          return;
+        }
       }
 
       video.style.display = '';
@@ -836,6 +858,7 @@ const Player = (() => {
     else root.requestFullscreen && root.requestFullscreen();
   }
   function switchEp(d) {
+    if (!root || !video || !state) return; // 退出后残留 ended 事件
     const g = state.groups[state.groupIndex];
     let ni = state.epIndex + d;
     if (ni < 0 || ni >= g.eps.length) {
@@ -1126,6 +1149,8 @@ const Player = (() => {
     }
 
     render(body);
+    KeyNav.setScope(d);
+    KeyNav.focusFirst(d);
   }
 
   /* ---------- 卡顿/黑屏看门狗:三级自愈 ①MSE修复+跳缓冲区 ②切软解兼容 ③自动换源 ---------- */
@@ -1158,6 +1183,24 @@ const Player = (() => {
       }, 15000);
     });
     ['playing', 'canplay', 'timeupdate'].forEach(n => video.addEventListener(n, () => clearTimeout(stallTimer)));
+
+    /* 无进度看门狗:有些源(如分享页解析失败)不会触发 waiting,也不报错,
+       只是画面不动、时间不走。这里定时检查「有没有在推进」,没有就按卡死处理。 */
+    if (state._progressTimer) clearInterval(state._progressTimer);
+    let lastTick = -1, lastTickAt = Date.now();
+    state._progressTimer = setInterval(() => {
+      if (!root || !video || iframe) return;
+      const t = video.currentTime || 0;
+      if (t !== lastTick) { lastTick = t; lastTickAt = Date.now(); return; }
+      /* 时间不动持续 25 秒 → 视为卡死 */
+      if (Date.now() - lastTickAt < 25000) return;
+      lastTickAt = Date.now();
+      const dur = video.duration || 0;
+      if (!isFinite(dur) || dur <= 0) return;                 // 直播/未知时长不判卡死
+      if (video.seeking || video.buffered.length === 0) return; // 正常缓冲中
+      if (maybeAutoSwitch('播放无响应')) return;
+      showCenter(`<div class="pl-msg">播放无响应(已停止推进)<br>可尝试「换源」或返回重选</div>`);
+    }, 5000);
   }
 
   /* ---------- 横排面板(选集/设置/换源):一排横向选项,非抽屉 ---------- */
@@ -1167,6 +1210,7 @@ const Player = (() => {
       if (elx) { if (elx.__cleanup) elx.__cleanup(); elx.remove(); }
     });
     KeyNav.setModal(false);
+    KeyNav.setScope(null);
   }
 
   /* ---------- 右侧媒体抽屉:选集 / 换源 / 字幕 / 弹幕 四 Tab ---------- */
@@ -1682,6 +1726,7 @@ const Player = (() => {
 
   /* ---------- 进度与历史 ---------- */
   function onTime() {
+    if (!root || !video) return; // 退出后仍可能派发残留 timeupdate
     lastPos = video.currentTime; lastDur = video.duration || 0;
     try { onTimeExtra(); } catch (_e) {}
     root.querySelector('#pl-cur').textContent = fmt(video.currentTime);
@@ -1703,6 +1748,8 @@ const Player = (() => {
       } catch (_e) {}
     }
   }
+  function onPauseEv() { if (!root) return; updatePlayBtn(); saveProgress(); }
+  function onEndedEv() { switchEp(1); }
   function saveProgress() {
     if (!state || !video || iframe) return;
     if (lastDur > 0 && lastPos > 3) {
@@ -1762,6 +1809,37 @@ const Player = (() => {
     if (!root) return;
     poke();
     const k = e.key;
+    const ae = document.activeElement;
+    const inInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    const panel = root.querySelector('.pl-strip, .pl-drawer');
+
+    /* 面板(选集/换源/设置/嗅探)打开时:方向键在面板内导航,Enter 确认,Esc/Backspace 关面板 */
+    if (panel) {
+      if (k === 'Escape') { e.preventDefault(); if (inInput) ae.blur(); else closePanels(); return; }
+      if (k === 'Backspace') { if (inInput) return; e.preventDefault(); closePanels(); return; } // 输入框内退格删字(不拦截默认)
+      if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+        if (inInput) return; // 输入框内方向键留给光标/软键盘
+        e.preventDefault();
+        KeyNav.setScope(panel);
+        KeyNav.move({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[k]);
+        return;
+      }
+      if (k === 'Enter') {
+        if (ae && ae.matches && ae.matches('[data-f]')) { e.preventDefault(); ae.click(); }
+        return;
+      }
+      return; // 面板开启时吞掉 f/e/s/v/n 等快捷,避免误触播放器
+    }
+
+    /* 无面板:输入框内退格删字、Esc 清空并失焦,均不退出播放器 */
+    if (inInput && k === 'Backspace') return;
+    if (inInput && k === 'Escape') {
+      e.preventDefault();
+      if (ae.value) { ae.value = ''; ae.dispatchEvent(new Event('input', { bubbles: true })); }
+      else ae.blur();
+      return;
+    }
+
     if (k === 'Escape' || k === 'Backspace') { e.preventDefault(); exit(); }
     else if (k === ' ' || k === 'Enter') { e.preventDefault(); togglePlay(); }
     else if (k === 'ArrowLeft') { e.preventDefault(); seekBy(-SEEK); }
@@ -1817,9 +1895,19 @@ const Player = (() => {
     document.removeEventListener('keydown', playerKeys, true);
     document.removeEventListener('mousemove', poke);
     clearInterval(saveTimer);
+    if (state && state._progressTimer) { clearInterval(state._progressTimer); state._progressTimer = null; }
     KeyNav.setPlayer(false);
+    KeyNav.setScope(null);
     if (root.querySelector('.pl-drawer')) KeyNav.setModal(false);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    /* 摘掉挂在 video 上的监听,防止退出后残留事件回调访问已置空的 root */
+    if (video) {
+      try {
+        video.removeEventListener('timeupdate', onTime);
+        video.removeEventListener('pause', onPauseEv);
+        video.removeEventListener('ended', onEndedEv);
+      } catch (_e) {}
+    }
     root.remove(); root = null; video = null;
     state && state.onClose && state.onClose();
   }

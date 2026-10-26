@@ -20,6 +20,60 @@ const API = (() => {
     return '/proxy/' + String(url).split('#')[0];
   }
 
+  /* 本地服务(App 内为设备自己的 MiniServer,浏览器端为同源) */
+  const LOCAL_SRV = IN_APP ? 'http://127.0.0.1:9978' : '';
+
+  /* URL 用 base64url 传参:Chromium 会直接丢弃含 %2F 的 URL(path/query 都一样),
+     base64url 字符集只有字母数字与 -_ ,不存在编码斜杠问题 */
+  function b64url(s) {
+    try {
+      return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /* 直链提取:把 HTML 分享页解析成真正的 m3u8/mp4 地址
+   * 采集源的 play_url 常常是带广告的分享页(/share/xxx、/play/xxx),
+   * 直接丢给 video 元素只会卡在 0:00。服务端抓页抽取直链,两端(MiniServer / server.js)行为一致。 */
+  async function sniffResolve(url) {
+    if (!url || !/^https?:/i.test(url)) return '';
+    const target = LOCAL_SRV + '/sniff2?b=' + b64url(String(url).split('#')[0]);
+    try {
+      console.log('[sniff] req', target);
+      let timer = null;
+      const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      if (ctrl) timer = setTimeout(() => ctrl.abort(), 15000);
+      const r = await fetch(target, {
+        headers: { 'Accept': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (timer) clearTimeout(timer);
+      console.log('[sniff] status', r.status);
+      if (!r.ok) return '';
+      const j = await r.json();
+      console.log('[sniff] result', JSON.stringify(j).slice(0, 300));
+      if (!j || !j.ok || !j.urls || !j.urls.length) return '';
+      return j.urls[0] || '';
+    } catch (e) {
+      console.log('[sniff] fail', (e && e.message) || e);
+      return '';
+    }
+  }
+
+  /* 按响应头 charset 解码:部分老仓库返回 GBK,直接 res.text() 会乱码导致 JSON 解析失败 */
+  async function readBody(res) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    const m = ct.match(/charset=["']?([\w-]+)/);
+    if (!m || /^utf-?8$|^ascii$|^us-ascii$/i.test(m[1])) return await res.text();
+    try {
+      const buf = await res.arrayBuffer();
+      return new TextDecoder(m[1]).decode(buf);
+    } catch (e) {
+      return '';
+    }
+  }
+
   async function fetchTextOnce(url, timeout) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
@@ -30,7 +84,7 @@ const API = (() => {
         try { body = (await res.text()).slice(0, 90); } catch {}
         throw new Error(friendlyNetError(body || ('HTTP ' + res.status)));
       }
-      return await res.text();
+      return await readBody(res);
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('请求超时(' + (timeout / 1000) + 's),源响应太慢或不可达');
       throw new Error(friendlyNetError(e.message || e));
@@ -428,32 +482,98 @@ const API = (() => {
   }
 
   function parseRepoConfig(text, repoBase) {
-    const j = tryJSON(text);
-    if (!j || typeof j !== 'object') return { type: 'invalid' };
+    const raw = String(text || '').trim();
+    if (!raw) return { type: 'invalid', reason: 'empty' };
+    const j = tryJSON(raw);
+    if (!j || typeof j !== 'object') {
+      /* 常见坑:地址失效/被运营商拦截后返回的是网页,而不是配置 */
+      const isHtml = /^<!doctype|^<html|<\/(html|body)>|<head>/i.test(raw);
+      return { type: 'invalid', reason: isHtml ? 'html' : 'json' };
+    }
+    const pickUrl = x => (typeof x === 'string' ? x : (x && (x.url || x.sourceUrl)) || '');
+    const pickName = x => (typeof x === 'string' ? '' : (x && (x.name || x.sourceName)) || '');
     if (Array.isArray(j.urls) || Array.isArray(j.storeHouse)) {
-      const repos = (j.urls || []).map(x => ({ name: x.name || x.sourceName || '', url: x.url || x.sourceUrl || '' }))
-        .concat((j.storeHouse || []).map(x => ({ name: x.sourceName || '', url: x.sourceUrl || '' })))
-        .filter(x => /^https?:\/\//i.test(x.url));
-      return repos.length ? { type: 'multi', repos } : { type: 'empty' };
+      const repos = (j.urls || []).map(x => ({ name: pickName(x), url: pickUrl(x) }))
+        .concat((j.storeHouse || []).map(x => ({ name: pickName(x), url: pickUrl(x) })))
+        .filter(x => /^https?:\/\//i.test(String(x.url || '').trim()));
+      return repos.length ? { type: 'multi', repos } : { type: 'empty', reason: 'urls-empty' };
     }
     if (Array.isArray(j.sites)) {
       const sites = [];
       const skippedNames = [];
       j.sites.forEach(s => {
         const api = resolveApi(s.api, repoBase);
-        const typeOk = s.type === 0 || s.type === 1;
+        const t = Number(s.type); // 有些仓库把 type 写成字符串 "0"/"1"
+        const typeOk = t === 0 || t === 1;
         const looksCms = /provide\/vod/i.test(String(s.api || ''));
         if (api && (typeOk || looksCms)) sites.push({ name: s.name || s.key || '未命名', api });
         else skippedNames.push(s.name || s.key || '未命名');
       });
       return { type: 'sites', sites, skipped: skippedNames.length, skippedNames };
     }
-    return { type: 'invalid' };
+    return { type: 'invalid', reason: 'shape', keys: Object.keys(j).slice(0, 6) };
   }
 
   async function fetchRepo(url) {
-    const text = await fetchText(proxied(url), 15000);
-    return parseRepoConfig(text, url);
+    /* TVBox 生态地址可能是「图片伪装配置」(饭太硬):okhttp UA 才返回图片,浏览器 UA 返回网页。
+     * UA 是浏览器禁止手动设置的请求头,所以统一走本地代理并透传 h= 头 */
+    const strip = t => String(t || '')
+      .replace(/^\s*```[a-z]*\s*/i, '').replace(/```\s*$/, '')          /* markdown 代码围栏 */
+      .split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n');      /* TVBox 容忍的 // 注释 */
+    const decodeImageConfig = bytes => {
+      const isJpg = bytes[0] === 0xFF && bytes[1] === 0xD8;
+      const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+      const isBmp = bytes[0] === 0x42 && bytes[1] === 0x4D;
+      if (!isJpg && !isPng && !isBmp) return null;
+      let tailBytes;
+      if (isJpg) {
+        let i = -1;
+        for (let k = bytes.length - 2; k > 4; k--) { if (bytes[k] === 0xFF && bytes[k + 1] === 0xD9) { i = k + 2; break; } }
+        if (i < 0) return null;
+        tailBytes = bytes.slice(i);
+      } else {
+        tailBytes = bytes.slice(bytes.length - Math.floor(bytes.length / 3));
+      }
+      let s = '';
+      tailBytes.forEach(c => { s += String.fromCharCode(c); });
+      const b64 = (s.includes('**') ? s.split('**').pop() : s).replace(/[^A-Za-z0-9+/=]/g, '');
+      if (b64.length < 100) return null;
+      try {
+        const bin = atob(b64);
+        const out = new Uint8Array(bin.length);
+        for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+        const txt = new TextDecoder('utf-8').decode(out);
+        return /"lives"|"sites"|"spider"/.test(txt) ? txt : null;
+      } catch (e) { return null; }
+    };
+    const viaProxy = (u, ua) => {
+      let p = (IN_APP ? 'http://127.0.0.1:9978' : '') + '/proxy/' + encodeURI(String(u).split('#')[0]);
+      if (ua) p += (p.includes('?') ? '&' : '?') + 'h=' + encodeURIComponent('User-Agent: ' + ua);
+      return p;
+    };
+    for (const ua of ['okhttp/3.15', '']) {
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 15000);
+        const res = await fetch(viaProxy(url, ua), { signal: ctl.signal });
+        clearTimeout(timer);
+        if (!res.ok) continue;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        /* 图片伪装配置 */
+        const cfg = decodeImageConfig(bytes);
+        if (cfg) return parseRepoConfig(strip(cfg), url);
+        /* 普通 JSON 配置(带 // 注释也能解析) */
+        const asText = new TextDecoder('utf-8').decode(bytes);
+        if (!/^\s*</.test(asText) && /^\s*\{/.test(asText)) return parseRepoConfig(strip(asText), url);
+      } catch (e) { /* 换下一通道 */ }
+    }
+    /* 兜底:原文本通道 */
+    try {
+      const text = await fetchText(url, 15000);
+      return parseRepoConfig(strip(text), url);
+    } catch (e) {
+      return { type: 'invalid', reason: 'net', detail: (e && e.message) || String(e) };
+    }
   }
 
   /* 详情缓存,避免重复请求 */
@@ -468,7 +588,7 @@ const API = (() => {
   }
 
   return {
-    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll,
+    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll, sniffResolve,
     home: (src) => realAdapter(src).home(src),
     category: (src, tid, pg) => realAdapter(src).category(src, tid, pg),
     detailOf, search: (src, wd, pg) => realAdapter(src).search(src, wd, pg),

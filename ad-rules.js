@@ -1,9 +1,13 @@
 /* 影视TV · M3U8 广告切片过滤引擎(浏览器/Node 双端共用)
- * 能滤:URL 特征匹配的贴片/插入切片广告、DISCONTINUITY 包裹的广告块
- * 不能滤:烧录在画面像素里的跑马灯水印(那是画面内容本身)
+ * 能滤:
+ *   - URL 特征匹配的贴片/插入切片广告(含博彩/赌博类:bet、casino、六合彩、彩票、开元/威尼斯/金沙等)
+ *   - DISCONTINUITY 包裹的广告块
+ *   - HLS 标准广告标记 #EXT-X-CUE-OUT ~ #EXT-X-CUE-IN 之间的切片(跑马灯/博彩贴片常走此通道)
+ * 不能滤:烧录在画面像素里的跑马灯水印(那是视频画面内容本身,任何 URL/切片规则都无能为力,只能靠播放器遮罩忽略)
  */
 (function (root) {
-  /* 内置广告 URL 特征(可被外部扩展) */
+  /* 内置广告 URL 特征(可被外部扩展)
+   * 覆盖:通用广告目录 / 博彩·赌博类贴片(跑马灯引流、六合彩、彩票、境外博彩站等) */
   const AD_URL_PATTERNS = [
     /\/ad[\/_\-\.]/i,           // /ad/ 目录
     /(^|[\/\.\-_])ads?([\/\.\-_]|$)/i,
@@ -15,6 +19,13 @@
     /\/vad[\/\.]/i,
     /adplayer/i,
     /\/cms\/ad/i,
+    /* ---- 博彩 / 赌博类贴片广告 ---- */
+    /(^|[\/\.\-_])bet([\/\.\-_]|$)/i,   // bet365 等
+    /(casino|gamble|gambl)/i,           // 赌场/博彩英文
+    /(博彩|赌博|賭博|赌场|六合彩|彩票|外围|私彩)/i,  // 中文博彩词(避开真人/开元/威尼斯等易误伤影视 URL 的词)
+    /(du[0-9]*(cai|bo)|piaoyou|piaojing|caitong|caipiao|liuhe|lhc)/i, // 赌彩/彩票/六合 拼音
+    /(yulecheng|太阳城|彩票|bet\d{2,3}|1xbet|pussy|\.cc\/)/i, // 博彩站常见特征
+    /(phish|钓鱼|诈骗)/i,
   ];
 
   function isAdUrl(u) {
@@ -33,8 +44,14 @@
     const out = [];
     const removedUrls = [];
     let i = 0;
+    let inAd = false;   // HLS SCTE-35 / CUE 广告区间标记
     while (i < lines.length) {
       const line = lines[i];
+      // HLS 标准广告标记:#EXT-X-CUE-OUT 到 #EXT-X-CUE-IN 之间的切片整段跳过
+      // (跑马灯/博彩贴片常借这个通道插入,比靠 URL 特征更稳)
+      if (/^#EXT-X-CUE-OUT/i.test(line) && !/CUE-OUT-CONT/i.test(line)) { inAd = true; i++; continue; }
+      if (/^#EXT-X-CUE-IN/i.test(line)) { inAd = false; i++; continue; }
+      if (inAd) { i++; continue; }
       // DISCONTINUITY 广告块:向前看整块
       if (/^#EXT-X-DISCONTINUITY/i.test(line)) {
         let j = i + 1;

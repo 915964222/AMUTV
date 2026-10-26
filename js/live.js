@@ -88,26 +88,35 @@
     const list = getPlaylists();
     if (url && list.some(function (x) { return x.url === url; })) return { ok: false, msg: '该直播源已存在' };
     const id = 'live_' + Date.now().toString(36);
-    list.push({ id: id, name: name || ('直播源' + (list.length + 1)), url: url || '', text: text || '', urls: (urls && urls.length ? urls : undefined) });
-    write(CK, list);
+    const item = { id: id, name: name || ('直播源' + (list.length + 1)), url: url || '', text: text || '', urls: (urls && urls.length ? urls : undefined) };
+    const next = list.concat([item]);
+    try {
+      localStorage.setItem(CK, JSON.stringify(next));   // 大源(数 MB)可能超配额,显式报错而非静默丢失
+    } catch (e) {
+      return { ok: false, msg: '本地存储空间不足(直播源过大),请换用较小的源' };
+    }
     return { ok: true, id: id };
   }
   function removePlaylist(id) { write(CK, getPlaylists().filter(function (x) { return x.id !== id; })); }
   function currentPl() { return read(CUR, null); }
   function setCurrentPl(id) { write(CUR, id); }
 
-  /* 预置直播源:多镜像候选(按国内可达性排序,逐个自动回退) */
+  /* 预置直播源:多镜像候选(按国内可达性排序,逐个自动回退)
+     全部镜像源都带 CORS 头(ACAO:*),故浏览器/App 直连兜底也可用 */
   const PRESETS = [
     { name: '肥羊直播·央视卫视', urls: [
       'https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
       'https://fastly.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
       'https://gcore.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/index.m3u',
       'https://ghproxy.net/https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/index.m3u',
+      'https://gh-proxy.com/https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/index.m3u',
+      'https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/index.m3u',
     ]},
     { name: 'IPTV·全球台', urls: [
       'https://iptv-org.github.io/iptv/index.m3u',
       'https://cdn.jsdelivr.net/gh/iptv-org/iptv@gh-pages/index.m3u',
       'https://ghproxy.net/https://raw.githubusercontent.com/iptv-org/iptv/gh-pages/index.m3u',
+      'https://gh-proxy.com/https://raw.githubusercontent.com/iptv-org/iptv/gh-pages/index.m3u',
     ]},
   ];
 
@@ -116,28 +125,116 @@
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
+  /* 与直播源同一套通道策略:App(file://) 用 Java 桥/本机代理,浏览器用本地 /proxy */
+  async function fetchRawText(url) {
+    const IN_APP = location.protocol === 'file:';
+    const APP_SRV = 'http://127.0.0.1:9978';
+    const viaHttp = async u => {
+      const r = await fetch(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    };
+    const tries = [];
+    if (IN_APP) {
+      if (window.YSTV && window.YSTV.fetchText) tries.push(async () => window.YSTV.fetchText(url, ''));
+      tries.push(() => viaHttp(APP_SRV + '/proxy/' + url));
+    } else {
+      tries.push(() => viaHttp('/proxy/' + url));
+    }
+    for (const fn of tries) {
+      try { const t = await fn(); if (t && String(t).trim()) return String(t); } catch (e) {}
+    }
+    return '';
+  }
+
+  /* ---------- XMLTV 全量节目单(e.xml,老张EPG聚合) ---------- */
+  const EPGX_URL = 'http://epg.51zmt.top:8000/e.xml';
+  let epgXmlIdx = null;      // {date:'YYYY-MM-DD', map:{规范频道名:[{start,end,title}]}}
+  let epgXmlPending = null;  // 并发请求共享同一个 Promise
+  /* 规范化:去空白/符号(直播源常写 CCTV-1,XMLTV 写 CCTV1) */
+  function normCh(n) { return String(n || '').replace(/[^0-9a-zA-Z\u4e00-\u9fa5]/g, '').toUpperCase(); }
+  /* 频道名候选键:全名 → 剥中文尾缀(CCTV-1 综合 → CCTV1),最长优先 */
+  function chKeys(n) {
+    const full = normCh(n);
+    const keys = [full];
+    let cur = full;
+    while (/[\u4e00-\u9fa5]$/.test(cur)) {
+      cur = cur.replace(/[\u4e00-\u9fa5]+$/, '');
+      if (cur && keys.indexOf(cur) < 0) keys.push(cur);
+    }
+    return keys;
+  }
+  function xmlTime(v) {   // 20261026200000 +0800 → 'HH:MM'
+    const m = String(v || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+    return m ? m[4] + ':' + m[5] : '';
+  }
+  function ensureXmlEpg() {
+    const date = todayStr();
+    if (epgXmlIdx && epgXmlIdx.date === date) return Promise.resolve(epgXmlIdx);
+    if (epgXmlPending) return epgXmlPending;
+    epgXmlPending = (async function () {
+      /* 上游偶发 502,重试 3 次 */
+      let text = '';
+      for (let i = 0; i < 3 && !text; i++) {
+        text = await fetchRawText(EPGX_URL);
+        if (!text) await new Promise(function (rs) { setTimeout(rs, 1200); });
+      }
+      if (!text) return null;
+      const doc = new DOMParser().parseFromString(text, 'text/xml');
+      if (!doc || !doc.querySelector('programme')) return null;
+      const today = date.replace(/-/g, '');
+      const nameById = {};
+      Array.prototype.forEach.call(doc.querySelectorAll('channel'), function (ch) {
+        const id = ch.getAttribute('id');
+        const dn = ch.querySelector('display-name');
+        if (id && dn) nameById[id] = dn.textContent.trim();
+      });
+      const map = {};
+      const put = function (k, it) { if (k) (map[k] = map[k] || []).push(it); };
+      Array.prototype.forEach.call(doc.querySelectorAll('programme'), function (p) {
+        const st = String(p.getAttribute('start') || '');
+        if (st.slice(0, 8) !== today) return;              // 只留当天,避免跨天污染分钟比较
+        const nm = nameById[p.getAttribute('channel')];
+        if (!nm) return;
+        const tEl = p.querySelector('title');
+        const it = {
+          start: xmlTime(st), end: xmlTime(p.getAttribute('stop')),
+          title: String(tEl ? tEl.textContent : '').replace(/--免费使用/g, '').trim(),
+        };
+        const ks = chKeys(nm);
+        put(ks[0], it);                                    // 全名与剥尾缀键都索引,双向可命中
+        if (ks[1]) put(ks[1], it);
+      });
+      epgXmlIdx = { date: date, map: map };
+      return epgXmlIdx;
+    })().catch(function () { return null; }).then(function (r) { epgXmlPending = null; return r; });
+    return epgXmlPending;
+  }
+
   async function fetchEpg(chName) {
     if (!chName) return null;
     const key = chName + '|' + todayStr();
     const m = read(EPG_CK, {});
-    if (m[key]) return m[key];
-    const clean = chName.replace(/\s+/g, '');
-    const url = (API.IN_APP && window.YSTV) || !API.IN_APP
-      ? null : null;
-    let reqUrl = 'http://epg.51zmt.top:8000/api/diyp/?ch=' + encodeURIComponent(clean) + '&date=' + todayStr();
-    let text = '';
-    if (location.protocol === 'file:' && window.YSTV && window.YSTV.fetchText) {
-      text = window.YSTV.fetchText(reqUrl, '');
-    } else {
-      const r = await fetch('/proxy/' + reqUrl);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      text = await r.text();
-    }
+    if (m[key] !== undefined) return m[key];
     let data = null;
     try {
+      const idx = await ensureXmlEpg();
+      if (idx && idx.map) {
+        let items = null;
+        const ks = chKeys(chName);
+        for (const k of ks) { if (idx.map[k]) { items = idx.map[k]; break; } }
+        if (items && items.length) data = { name: chName, items: items };
+      }
+    } catch (e) {}
+    if (!data) {
+      const clean = chName.replace(/\s+/g, '');
+      const reqUrl = 'http://epg.51zmt.top:8000/api/diyp/?ch=' + encodeURIComponent(clean) + '&date=' + todayStr();
+      const text = await fetchRawText(reqUrl);
+      try {
       const j = JSON.parse(text);
       data = { name: j.channel_name, items: (j.epg_data || []).map(function (e) { return { start: e.start, end: e.end, title: String(e.title || '').replace(/--免费使用/g, '').trim() }; }) };
-    } catch (e) { data = null; }
+      } catch (e) { data = null; }
+    }
     m[key] = data;
     write(EPG_CK, m);
     return data;
@@ -157,11 +254,54 @@
     return { now: cur, next: next };
   }
 
+  /* ---------- 回看(catchup):按各源模板把起止时间拼进播放地址 ---------- */
+  function ts(t, date) {   // 'HH:MM' + 当天 → YYYYMMDDHHMMSS
+    const d = date || new Date();
+    const p = String(t).split(':');
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + pad(+p[0]) + pad(+p[1]) + '00';
+  }
+  function catchupUrl(base, startHM, endHM) {
+    const s = ts(startHM), e = ts(endHM);
+    const u = String(base || '');
+    const join = u.indexOf('?') >= 0 ? '&' : '?';
+    /* 覆盖常见 IPTV catchup 参数风格 */
+    return u + join + 'playseek=' + s + '-' + e;
+  }
+
+  /* ---------- 预约提醒:持久化存储 + 打开直播页时轮询触发 ---------- */
+  const RM_CK = 'tvw_live_reminders';
+  function getReminders() { return read(RM_CK, []); }
+  function addReminder(item) {   // {chName, groupName, title, start, fireAt(ms)}
+    const list = getReminders().filter(x => !(x.chName === item.chName && x.start === item.start));
+    list.push(item);
+    write(RM_CK, list);
+    return true;
+  }
+  function removeReminder(chName, start) { write(RM_CK, getReminders().filter(x => !(x.chName === chName && x.start === start))); }
+  function hasReminder(chName, start) { return getReminders().some(x => x.chName === chName && x.start === start); }
+  let rmTimer = null;
+  function startReminderLoop(onFire) {
+    clearInterval(rmTimer);
+    rmTimer = setInterval(function () {
+      const now = Date.now();
+      let list = getReminders();
+      const due = list.filter(x => now >= x.fireAt && now - x.fireAt < 30 * 60000);  // 错过超30分钟不再提示
+      if (!due.length) return;
+      list = list.filter(x => !(now >= x.fireAt && now - x.fireAt < 30 * 60000));
+      write(RM_CK, list);
+      due.forEach(x => { try { onFire && onFire(x); } catch (e) {} });
+    }, 20000);
+  }
+
   window.Live = {
     parsePlaylist: parsePlaylist,
     getPlaylists: getPlaylists, addPlaylist: addPlaylist, removePlaylist: removePlaylist,
     currentPl: currentPl, setCurrentPl: setCurrentPl,
     PRESETS: PRESETS,
     fetchEpg: fetchEpg, nowNext: nowNext,
+    catchupUrl: catchupUrl,
+    getReminders: getReminders, addReminder: addReminder, removeReminder: removeReminder, hasReminder: hasReminder,
+    startReminderLoop: startReminderLoop,
   };
 })();
