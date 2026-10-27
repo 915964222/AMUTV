@@ -71,3 +71,36 @@ cd /d/leidian/LDPlayer9 && ./dnplayer.exe index=0     # 启动雷电 index=0
 ## 排查口诀
 
 > 点不动先看 `adb devices` 是不是 `device`。不是 → 环境问题；是 → 才怀疑坐标 / 焦点 / 业务代码。
+
+## 更可靠的一招:直接调 DOM(CDP)
+
+在 TV 上靠 `input tap x y` 点网页元素有三个坑,踩过就会反复浪费时间:
+
+1. 坐标要按 **2560×1440** 换算,而你看的截图是缩略图,目测必偏几十~上百像素 → 点空或点到隔壁按钮;
+2. 元素在**滚动区外**时,`uiautomator dump` 里根本没有它的节点(`bounds=[0,0][0,0]` 或直接缺失);
+3. `input` 事件偶发丢失,点了没反应还以为是业务 bug。
+
+正确做法是走 **WebView 远程调试**(App 已 `setWebContentsDebuggingEnabled(true)`):
+
+```bash
+SOCK=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | head -1)
+adb forward tcp:9222 localabstract:$SOCK
+
+node tools/cdp.js 'document.getElementById("top-set").click(); "ok"'
+node tools/cdp.js 'document.getElementById("wifi-list").innerText'
+node tools/cdp.js 'document.getElementById("wifi-scan").closest(".sec-card").scrollIntoView({block:"center"})'
+```
+
+`tools/cdp.js` 会自动连 `127.0.0.1:9222/json` 找到页面、发 `Runtime.evaluate`(带 `userGesture`,
+所以 `click()` 能触发真实交互),把返回值按 JSON 打印。滚动、点击、读文本一次搞定,不依赖坐标。
+
+### 配套:`tv.sh find` / `tv.sh tapfind`
+
+只查原生层(系统权限弹窗、设置页按钮)时用这两个,它们会 dump UI 树并按 `text` 或 `#resource-id` 反查中心坐标:
+
+```bash
+bash tools/tv.sh find "#top-set"      # → 2476 69 [2432,24][2520,114] 设置 | top-set
+bash tools/tv.sh tapfind "#wifi-scan" # 找到就点它的中心
+```
+
+`bounds=[0,0][0,0]` 表示元素在可视区外,滚一下再查。网页内部的元素优先用 CDP,更稳。

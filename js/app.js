@@ -1381,6 +1381,7 @@ const App = (() => {
             <input id="kw" data-f tabindex="-1" placeholder="搜片名 / 拼音首字母(如 dxt)" autocomplete="off" />
             <span class="sr-py" id="sr-py" style="display:none">拼音模式</span>
             <button class="sr-clear" id="kw-clear" data-f tabindex="-1" title="清空" style="display:none">✕</button>
+            <button class="sr-mic" id="sr-mic" data-f tabindex="-1" title="语音搜索">🎤</button>
             <button class="sr-go" id="do-search" data-f tabindex="-1">搜索</button>
           </div>
           <div class="sr-sug" id="sr-sug" style="display:none"></div>
@@ -1481,6 +1482,7 @@ const App = (() => {
     view().querySelector('#kw-clear').onclick = () => { kwInput.value = ''; kwInput.focus(); kwInput.dispatchEvent(new Event('input')); };
     view().querySelector('.sr-back').onclick = () => go('home');
     view().querySelector('#do-search').onclick = () => doSearch(kwInput.value.trim());
+    view().querySelector('#sr-mic').onclick = () => { if (window.Voice) Voice.start(); else toastErr('当前环境不支持语音输入'); };
     KeyNav.focusFirst();
   }
 
@@ -2291,6 +2293,40 @@ const App = (() => {
           <div class="hint">默认接口:弹弹play 官方(2025 起匿名访问已关闭,需填入自己申请的 AppId/AppSecret)。
           自定义接口:填一个含 <b>{fileName}</b> 占位的 URL,播放器点「在线弹幕」时用当前文件名请求;返回 B站弹幕 XML 或 dandanplay JSON 均可自动识别。</div>
         </section>
+        <section class="sec-card span-2">
+          <div class="sec-head"><span class="sec-ico">${I_SET.tv}</span>网络与蓝牙<span class="sec-tag" id="sys-tag">检测中…</span></div>
+          <div class="net-grid">
+            <div class="net-col">
+              <div class="net-hd">
+                <b>📶 WiFi</b><span class="net-cur" id="wifi-cur">—</span>
+                <span class="net-btns">
+                  <button class="mini-btn" id="wifi-scan" data-f tabindex="-1">扫描</button>
+                  <button class="mini-btn" id="wifi-open" data-f tabindex="-1">系统设置</button>
+                </span>
+              </div>
+              <div class="net-pwd" id="wifi-pwd" style="display:none">
+                <span class="net-pwd-t" id="wifi-pwd-t">密码</span>
+                <input id="wifi-pwd-in" data-f tabindex="-1" type="password" placeholder="WiFi 密码(开放网络留空)">
+                <button class="mini-btn" id="wifi-pwd-ok" data-f tabindex="-1">连接</button>
+                <button class="mini-btn danger" id="wifi-pwd-cancel" data-f tabindex="-1">取消</button>
+              </div>
+              <div class="src-list net-list" id="wifi-list"><div class="hint" style="margin:0">点「扫描」获取附近 WiFi</div></div>
+            </div>
+            <div class="net-col">
+              <div class="net-hd">
+                <b>🔵 蓝牙</b><span class="net-cur" id="bt-cur">—</span>
+                <span class="net-btns">
+                  <button class="mini-btn" id="bt-scan" data-f tabindex="-1">扫描</button>
+                  <button class="mini-btn" id="bt-enable" data-f tabindex="-1">开启</button>
+                  <button class="mini-btn" id="bt-open" data-f tabindex="-1">系统设置</button>
+                </span>
+              </div>
+              <div class="src-list net-list" id="bt-list"><div class="hint" style="margin:0">点「扫描」发现附近设备(遥控器/音箱需先进配对模式)</div></div>
+            </div>
+          </div>
+          <div class="hint">WiFi:连接会弹系统「添加网络」确认框(Android 11+),确认后由系统保存并自动连接;Android 10 起普通应用不能直接开关 WiFi,可用「系统设置」手动开关。
+          蓝牙:「连接」优先走 A2DP(音箱/耳机),若系统不允许则跳到系统蓝牙设置点选设备。首次扫描会请求「定位/附近的设备」权限,用遥控器选『允许』即可。</div>
+        </section>
         <section class="sec-card">
           <div class="sec-head"><span class="sec-ico">${I_SET.chip}</span>设备解码能力<span class="sec-tag">如实检测</span></div>
           <div class="cap-grid" id="cap-grid">检测中…</div>
@@ -2324,6 +2360,7 @@ const App = (() => {
     renderRepoList(repos);
     renderDriveList(drives);
     bindSettingsActions(cfg);
+    initSysPanel();
   }
 
   function renderSrcList(srcs, cur) {
@@ -2479,6 +2516,212 @@ const App = (() => {
     } catch (e) {
       if (!silent) toastErr('仓库拉取失败:' + (e.message || e));
     }
+  }
+
+  /* ============ 网络与蓝牙(WiFi / 蓝牙) ============
+   * 数据来自本机 MiniServer 的 /sys/* (见 android/SysCtl.java):
+   *   WiFi 扫描需要定位/附近设备权限(首次点扫描会弹系统框),13+ 还建议 NEARBY_WIFI_DEVICES;
+   *   连接在 Android 11+ 走系统「添加网络」确认框,由系统自己保存并连接;
+   *   蓝牙扫描/配对需要 BLUETOOTH_SCAN / BLUETOOTH_CONNECT,连接优先 A2DP。
+   * 浏览器/桌面端没有这些端点 → 显示"仅安卓端可用",不假装成功。
+   */
+  let _sysPending = null;   // 授权通过后要重跑的动作
+
+  /* 原生权限回调(android/MainActivity.java onRequestPermissionsResult) */
+  window.__onPerm = (ok, total) => {
+    if (ok > 0) {
+      toast(`权限已授予 ${ok}/${total},继续…`);
+      const fn = _sysPending; _sysPending = null;
+      if (fn) setTimeout(fn, 500);
+    } else {
+      toastErr('权限被拒绝,无法扫描(可到系统设置里手动开启)');
+      _sysPending = null;
+    }
+  };
+
+  function initSysPanel() {
+    const $ = s => view().querySelector(s);
+    const tag = $('#sys-tag');
+    if (!tag) return;
+    const wifiList = $('#wifi-list'), btList = $('#bt-list');
+    const wifiCur = $('#wifi-cur'), btCur = $('#bt-cur');
+    const pwdBox = $('#wifi-pwd'), pwdIn = $('#wifi-pwd-in'), pwdT = $('#wifi-pwd-t');
+    let pendingSsid = '';
+
+    const hintHtml = t => `<div class="hint" style="margin:0">${escHtml(t)}</div>`;
+
+    /* ---- 概览 ---- */
+    async function loadSys() {
+      if (!API.SYS.avail) {
+        tag.textContent = '仅安卓端可用';
+        wifiCur.textContent = '—';
+        btCur.textContent = '—';
+        wifiList.innerHTML = hintHtml('浏览器/桌面端没有系统网络接口,装到电视端即可使用');
+        btList.innerHTML = hintHtml('蓝牙管理仅安卓 TV 端可用');
+        return;
+      }
+      const info = await API.SYS.info();
+      if (!info || !info.ok) {
+        tag.textContent = '不可用';
+        wifiList.innerHTML = hintHtml('读取失败:' + ((info && info.msg) || '无响应'));
+        btList.innerHTML = hintHtml('读取失败');
+        return;
+      }
+      tag.textContent = (info.model || 'Android') + ' · API ' + (info.sdk || '?');
+      renderWifi(info.wifi);
+      renderBt(info.bt);
+      /* 有权限且 WiFi 开着 → 自动拉一次列表(系统有缓存,通常秒回),省得每次进来手点扫描。
+         蓝牙不自动扫:发现过程要 10s+,会拖慢设置页。 */
+      const w = info.wifi || {};
+      if (w.supported !== false && w.enabled && !w.needPerm) scanWifi();
+    }
+
+    function renderWifi(w) {
+      if (!w || w.supported === false) { wifiCur.textContent = '本机无 WiFi'; return; }
+      if (!w.enabled) wifiCur.textContent = '已关闭';
+      else if (w.connected) wifiCur.innerHTML = `已连接 <b>${escHtml(w.ssid)}</b>${w.ip ? ' · ' + escHtml(w.ip) : ''}`;
+      else wifiCur.textContent = '已开启 · 未连接';
+    }
+
+    function renderBt(b) {
+      if (!b || b.supported === false) {
+        btCur.textContent = '本机无蓝牙硬件';
+        btList.innerHTML = hintHtml('该设备没有蓝牙适配器(模拟器/部分电视盒子),仍可在「系统设置」里查看');
+        return;
+      }
+      btCur.textContent = b.enabled ? ('已开启' + (b.name ? ' · ' + b.name : '')) : '已关闭';
+      const arr = b.bonded || [];
+      if (!arr.length) {
+        btList.innerHTML = hintHtml(b.enabled ? '还没有已配对设备,点「扫描」发现新设备' : '蓝牙已关闭,点「开启」后扫描');
+        return;
+      }
+      btList.innerHTML = '';
+      arr.forEach(n => btList.appendChild(btRow(n)));
+    }
+
+    /* ---- WiFi ---- */
+    async function scanWifi() {
+      wifiList.innerHTML = hintHtml('扫描中…(首次会请求定位/附近设备权限)');
+      const r = await API.SYS.wifiScan();
+      if (r.needPerm) {
+        _sysPending = scanWifi;
+        wifiList.innerHTML = hintHtml('等待授权:请用遥控器在系统弹窗里选「允许」');
+        toastErr('需要「定位/附近设备」权限才能扫描 WiFi');
+        return;
+      }
+      if (!r.ok) {
+        wifiList.innerHTML = hintHtml(r.msg || '扫描失败');
+        if (r.off) toastErr('WiFi 已关闭');
+        return;
+      }
+      const arr = r.list || [];
+      wifiList.innerHTML = '';
+      if (!arr.length) { wifiList.innerHTML = hintHtml(r.msg || '没扫到网络'); return; }
+      arr.forEach(n => wifiList.appendChild(wifiRow(n)));
+      API.SYS.wifiState().then(renderWifi);
+    }
+
+    function wifiRow(n) {
+      const bars = (n.bars || 1);
+      const item = UI.el(`<div class="src-item net-row">
+        <span class="net-signal">${'▮'.repeat(bars)}<span class="dim">${'▯'.repeat(Math.max(0, 5 - bars))}</span></span>
+        <span class="s-name">${escHtml(n.ssid)}${n.current ? ' <span style="color:var(--green);font-size:11px">[已连接]</span>' : ''}
+          <br><span class="s-api">${n.secured ? '加密' : '开放'} · ${n.rssi} dBm${n.freq ? ' · ' + n.freq + 'MHz' : ''}</span></span>
+        <button class="mini-btn" data-f tabindex="-1">${n.current ? '已连接' : '连接'}</button>
+      </div>`);
+      const btn = item.querySelector('button');
+      if (n.current) { btn.disabled = true; btn.style.opacity = '.5'; }
+      btn.onclick = () => {
+        if (n.secured) {
+          pendingSsid = n.ssid;
+          pwdT.textContent = '连接 ' + n.ssid;
+          pwdBox.style.display = '';
+          pwdIn.value = '';
+          pwdIn.focus();
+          try { pwdIn.click(); } catch (e) {}
+        } else {
+          doWifiConnect(n.ssid, '');
+        }
+      };
+      return item;
+    }
+
+    async function doWifiConnect(ssid, pwd) {
+      toast('正在连接 ' + ssid + '…');
+      const r = await API.SYS.wifiConnect(ssid, pwd);
+      if (r && r.ok) toast(r.msg || '已发起连接', '', 4000);
+      else if (r && r.needSettings) toast(r.msg || '请到系统 WiFi 设置里连接', '', 6000);
+      else toastErr((r && r.msg) || '连接失败');
+      pwdBox.style.display = 'none';
+      setTimeout(() => { API.SYS.wifiState().then(renderWifi); }, 3000);
+      setTimeout(() => { API.SYS.wifiState().then(renderWifi); }, 8000);
+    }
+
+    /* ---- 蓝牙 ---- */
+    async function scanBt() {
+      btList.innerHTML = hintHtml('扫描中…(约 10 秒,首次会请求「附近的设备」权限)');
+      const r = await API.SYS.btScan();
+      if (r.needPerm) {
+        _sysPending = scanBt;
+        btList.innerHTML = hintHtml('等待授权:请在系统弹窗里选「允许」');
+        toastErr('需要「附近的设备」权限才能扫描蓝牙');
+        return;
+      }
+      if (!r.ok) { btList.innerHTML = hintHtml(r.msg || '扫描失败'); return; }
+      const arr = r.list || [];
+      btList.innerHTML = '';
+      if (!arr.length) { btList.innerHTML = hintHtml(r.msg || '没发现设备'); return; }
+      arr.forEach(n => btList.appendChild(btRow(n)));
+      API.SYS.btState().then(renderBt0);
+    }
+
+    /* 只更新蓝牙标题,不动列表(避免扫描结果被覆盖) */
+    function renderBt0(b) {
+      if (!b || b.supported === false) { btCur.textContent = '本机无蓝牙硬件'; return; }
+      btCur.textContent = b.enabled ? ('已开启' + (b.name ? ' · ' + b.name : '')) : '已关闭';
+    }
+
+    function btRow(n) {
+      const item = UI.el(`<div class="src-item net-row">
+        <span class="net-signal">${n.bonded ? '🔗' : '📡'}</span>
+        <span class="s-name">${escHtml(n.name)}${n.bonded ? ' <span style="color:var(--green);font-size:11px">[已配对]</span>' : ''}
+          <br><span class="s-api">${escHtml(n.type || '')} · ${escHtml(n.mac || '')}${n.rssi ? ' · ' + n.rssi + ' dBm' : ''}</span></span>
+        <button class="mini-btn" data-f tabindex="-1">${n.bonded ? '连接' : '配对'}</button>
+      </div>`);
+      const btn = item.querySelector('button');
+      btn.onclick = async () => {
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = '…';
+        const r = n.bonded ? await API.SYS.btConnect(n.mac) : await API.SYS.btPair(n.mac);
+        if (r && r.ok) toast(r.msg || '已发起');
+        else toastErr((r && r.msg) || '操作失败');
+        btn.disabled = false; btn.textContent = label;
+        setTimeout(async () => {
+          const st = await API.SYS.btState();
+          renderBt0(st);
+        }, 2500);
+      };
+      return item;
+    }
+
+    /* ---- 绑定 ---- */
+    $('#wifi-scan').onclick = scanWifi;
+    $('#wifi-open').onclick = () => { API.SYS.wifiOpen(); toast('已打开系统 WiFi 设置'); };
+    $('#bt-scan').onclick = scanBt;
+    $('#bt-enable').onclick = async () => {
+      if (!API.SYS.avail) { toastErr('仅安卓端可用'); return; }
+      await API.SYS.btEnable();
+      toast('已弹出蓝牙开启确认,请选「允许」');
+      setTimeout(() => API.SYS.btState().then(renderBt), 2500);
+    };
+    $('#bt-open').onclick = () => { API.SYS.btOpen(); toast('已打开系统蓝牙设置'); };
+    $('#wifi-pwd-ok').onclick = () => doWifiConnect(pendingSsid, pwdIn.value || '');
+    $('#wifi-pwd-cancel').onclick = () => { pwdBox.style.display = 'none'; };
+    pwdIn.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doWifiConnect(pendingSsid, pwdIn.value || ''); }
+    };
+
+    loadSys();
   }
 
   function bindSettingsActions(cfg) {
@@ -3019,6 +3262,25 @@ const App = (() => {
   }
   /* 安卓遥控器的「返回」键由 MainActivity 调这里:返回 1=网页已处理,0=可以退出应用 */
   window.__onBack = function () { try { return goBack() ? 1 : 0; } catch (e) { return 0; } };
+
+  /* 语音助手的执行入口:页面跳转与搜索都在 app.js 闭包内,这里开一个受控出口,
+     避免 voice.js 直接操作内部函数(改路由时只需维护这一处) */
+  window.AppCtl = {
+    go: function (id) { try { go(id); return true; } catch (e) { return false; } },
+    search: function (wd) {
+      try {
+        if (window.OSK) OSK.close(false);
+        go('search');
+        var tries = 0;
+        (function fill() {
+          var kw = document.getElementById('kw'), btn = document.getElementById('do-search');
+          if (kw && btn) { kw.value = wd; btn.click(); return; }
+          if (tries++ < 10) setTimeout(fill, 50);
+        })();
+        return true;
+      } catch (e) { return false; }
+    }
+  };
   /* U盘/存储插拔:原生广播回调 → 提示 + 若在网盘页则刷新卷列表(即插即播) */
   window.__onUsb = function (mounted) {
     try {

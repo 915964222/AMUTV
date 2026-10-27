@@ -134,6 +134,19 @@ public class MiniServer {
         try { return java.net.URLDecoder.decode(s.replace("+", "%2B"), "utf-8"); } catch (Throwable t) { return s; }
     }
 
+    /* POST 参数:同时吃 form-urlencoded 与 JSON 两种 body(前端用 form,外部脚本用 JSON 都能通) */
+    private static String postArg(String body, String key, String dft) {
+        if (body != null && body.length() > 0) {
+            String v = qp(body, key);
+            if (v.length() > 0) return v;
+            try {
+                JSONObject j = new JSONObject(body);
+                if (j.has(key)) return j.optString(key, dft);
+            } catch (Throwable ignored) {}
+        }
+        return dft;
+    }
+
     /* ---------------- 路由 ---------------- */
     private static void route(Socket sk, String method, String path, String query, String body, String range) {
         try {
@@ -242,6 +255,40 @@ public class MiniServer {
                 String target = qp(query, "u");
                 boolean quark = "1".equals(qp(query, "h"));
                 streamOut(sk, target, range, quark); return;
+            }
+
+            /* ---- 系统能力:WiFi / 蓝牙(仅本机可调,避免局域网设备动本机网络) ---- */
+            if (path.startsWith("/sys/")) {
+                if (!sk.getInetAddress().isLoopbackAddress()) {
+                    json(sk, 403, "{\"error\":\"forbidden\"}"); return;
+                }
+                if (path.equals("/sys/info")) { json(sk, 200, SysCtl.info(ctx).toString(), true); return; }
+                if (path.equals("/sys/wifi/state")) { json(sk, 200, SysCtl.wifiState(ctx).toString(), true); return; }
+                if (path.equals("/sys/wifi/scan")) { json(sk, 200, SysCtl.wifiScan(ctx).toString(), true); return; }
+                if (path.equals("/sys/wifi/connect")) {
+                    String s = postArg(body, "ssid", qp(query, "ssid"));
+                    String p = postArg(body, "pwd", qp(query, "pwd"));
+                    json(sk, 200, SysCtl.wifiConnect(ctx, s, p).toString(), true); return;
+                }
+                if (path.equals("/sys/wifi/open")) { SysCtl.openWifiSettings(ctx); json(sk, 200, "{\"ok\":true}"); return; }
+                if (path.equals("/sys/bt/state")) { json(sk, 200, SysCtl.btState(ctx).toString(), true); return; }
+                if (path.equals("/sys/bt/scan")) { json(sk, 200, SysCtl.btScan(ctx).toString(), true); return; }
+                if (path.equals("/sys/bt/pair")) {
+                    json(sk, 200, SysCtl.btPair(ctx, postArg(body, "mac", qp(query, "mac"))).toString(), true); return;
+                }
+                if (path.equals("/sys/bt/connect")) {
+                    json(sk, 200, SysCtl.btConnect(ctx, postArg(body, "mac", qp(query, "mac"))).toString(), true); return;
+                }
+                if (path.equals("/sys/bt/enable")) { SysCtl.requestBtEnable(ctx); json(sk, 200, "{\"ok\":true,\"msg\":\"已弹出蓝牙开启确认\"}"); return; }
+                if (path.equals("/sys/bt/open")) { SysCtl.openBtSettings(ctx); json(sk, 200, "{\"ok\":true}"); return; }
+                if (path.equals("/sys/perm")) {
+                    boolean w = "1".equals(qp(query, "w")) || "true".equals(qp(query, "w"));
+                    boolean b = "1".equals(qp(query, "b")) || "true".equals(qp(query, "b"));
+                    boolean ok = SysCtl.ensurePerms(ctx, w, b);
+                    json(sk, 200, "{\"ok\":" + ok + ",\"wifi\":" + (SysCtl.missingWiFi(ctx).size() == 0) +
+                            ",\"bt\":" + (SysCtl.missingBt(ctx).size() == 0) + "}", true); return;
+                }
+                json(sk, 404, "{\"error\":\"unknown sys api\"}"); return;
             }
 
             /* ---- U盘/本地存储(即插即播:卷检测 + 目录浏览 + Range 流式播放) ----

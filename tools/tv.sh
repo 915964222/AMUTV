@@ -12,6 +12,8 @@
 #   status                    打印 server 与设备状态
 #   dev                       打印当前设备序列号
 #   shot <name>               截图并拉取到 build/<name>.png
+#   find <text|#resource-id>  在 UI 树里找元素,输出中心坐标(不点)
+#   tapfind <text|#id>        找到元素并点它的中心(最可靠,不用猜坐标)
 #   tap <x> <y>               点击(设备真实坐标, 2560x1440)
 #   key <KEYCODE> [次数]      按键(如 KEYCODE_DPAD_DOWN 3)
 #   swipe <x1> <y1> <x2> <y2> [ms]
@@ -121,6 +123,72 @@ case "$cmd" in
     a pull "/sdcard/$name.png" "$local_out" >/dev/null || {
       echo "[tv] 截图失败: $local_out" >&2; exit 1; }
     echo "$BUILD/$name.png"
+    ;;
+
+  find)
+    # 在 UI 树里定位元素,输出: <cx> <cy> <bounds> <text> | <resource-id>
+    # 用途:截图里目测坐标经常差几十上百像素(缩略图缩放),猜坐标会点空/点到隔壁按钮。
+    ensure_ready || exit 1
+    mkdir -p "$BUILD"
+    a shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    a pull /sdcard/ui.xml "$(winpath "$BUILD/ui.xml")" >/dev/null 2>&1 || {
+      echo "[tv] dump 失败" >&2; exit 1; }
+    "${TV_PY:-python}" - "$(winpath "$BUILD/ui.xml")" "${1:-}" <<'PY'
+import re, sys
+xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+key = sys.argv[2]
+found = 0
+for m in re.finditer(r'<node\b[^>]*>', xml):
+    seg = m.group(0)
+    rid = re.search(r'resource-id="([^"]*)"', seg)
+    txt = re.search(r'text="([^"]*)"', seg)
+    bd = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', seg)
+    if not bd:
+        continue
+    t = txt.group(1) if txt else ''
+    r = rid.group(1) if rid else ''
+    hit = (r == key[1:]) if key.startswith('#') else (key and key in t)
+    if not hit:
+        continue
+    x1, y1, x2, y2 = map(int, bd.groups())
+    print(f"{(x1 + x2) // 2} {(y1 + y2) // 2} [{x1},{y1}][{x2},{y2}] {t} | {r}")
+    found += 1
+    if found >= 8:
+        break
+if not found:
+    sys.exit(3)
+PY
+    ;;
+
+  tapfind)
+    ensure_ready || exit 1
+    mkdir -p "$BUILD"
+    a shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    a pull /sdcard/ui.xml "$(winpath "$BUILD/ui.xml")" >/dev/null 2>&1 || {
+      echo "[tv] dump 失败" >&2; exit 1; }
+    pos="$("${TV_PY:-python}" - "$(winpath "$BUILD/ui.xml")" "${1:-}" <<'PY'
+import re, sys
+xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+key = sys.argv[2]
+for m in re.finditer(r'<node\b[^>]*>', xml):
+    seg = m.group(0)
+    rid = re.search(r'resource-id="([^"]*)"', seg)
+    txt = re.search(r'text="([^"]*)"', seg)
+    bd = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', seg)
+    if not bd:
+        continue
+    t = txt.group(1) if txt else ''
+    r = rid.group(1) if rid else ''
+    hit = (r == key[1:]) if key.startswith('#') else (key and key in t)
+    if hit:
+        x1, y1, x2, y2 = map(int, bd.groups())
+        print(f"{(x1 + x2) // 2} {(y1 + y2) // 2}")
+        break
+PY
+)"
+    if [ -z "$pos" ]; then echo "[tv] 没找到元素: $1" >&2; exit 3; fi
+    echo "[tv] tapfind '$1' → $pos"
+    a shell input tap $pos
     ;;
 
   tap)

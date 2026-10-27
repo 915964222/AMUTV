@@ -592,8 +592,57 @@ const API = (() => {
     return item;
   }
 
+  /* ================= 系统能力:WiFi / 蓝牙 =================
+   * 只有安卓 App 内(WebView file:// + 本机 MiniServer)才有 /sys/* 端点;
+   * 浏览器/桌面端返回 { ok:false, noSys:true },由设置页提示"仅安卓端可用"。
+   * 所有接口都做了超时:扫描类本来就要等(蓝牙发现 ~13s),给足 30s。
+   */
+  const SYS_AVAIL = IN_APP;
+
+  async function sysFetch(path, opt) {
+    if (!SYS_AVAIL) return { ok: false, noSys: true, msg: '该功能仅在安卓 TV 端可用' };
+    const ctrl = new AbortController();
+    const wait = (opt && opt.timeout) || 30000;
+    const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, wait);
+    try {
+      const r = await fetch(LOCAL_SRV + path, {
+        method: (opt && opt.method) || 'GET',
+        headers: (opt && opt.body) ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
+        body: (opt && opt.body) || undefined,
+        signal: ctrl.signal,
+        cache: 'no-store',
+      });
+      const txt = await r.text();
+      try { return JSON.parse(txt); } catch (e) { return { ok: false, msg: '返回异常: ' + txt.slice(0, 80) }; }
+    } catch (e) {
+      const abort = e && (e.name === 'AbortError');
+      return { ok: false, msg: abort ? '操作超时(设备可能无响应)' : ('请求失败: ' + ((e && e.message) || e)) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const SYS = {
+    avail: SYS_AVAIL,
+    info: () => sysFetch('/sys/info', { timeout: 8000 }),
+    wifiState: () => sysFetch('/sys/wifi/state', { timeout: 8000 }),
+    wifiScan: () => sysFetch('/sys/wifi/scan', { timeout: 30000 }),
+    wifiConnect: (ssid, pwd) => sysFetch('/sys/wifi/connect', {
+      method: 'POST', timeout: 15000,
+      body: 'ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd || ''),
+    }),
+    wifiOpen: () => sysFetch('/sys/wifi/open', { timeout: 6000 }),
+    btState: () => sysFetch('/sys/bt/state', { timeout: 8000 }),
+    btScan: () => sysFetch('/sys/bt/scan', { timeout: 40000 }),
+    btPair: (mac) => sysFetch('/sys/bt/pair', { method: 'POST', timeout: 15000, body: 'mac=' + encodeURIComponent(mac) }),
+    btConnect: (mac) => sysFetch('/sys/bt/connect', { method: 'POST', timeout: 15000, body: 'mac=' + encodeURIComponent(mac) }),
+    btEnable: () => sysFetch('/sys/bt/enable', { timeout: 6000 }),
+    btOpen: () => sysFetch('/sys/bt/open', { timeout: 6000 }),
+    perm: (w, b) => sysFetch('/sys/perm?w=' + (w ? 1 : 0) + '&b=' + (b ? 1 : 0), { timeout: 8000 }),
+  };
+
   return {
-    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll, sniffResolve, sniffDetail,
+    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll, sniffResolve, sniffDetail, SYS,
     home: (src) => realAdapter(src).home(src),
     category: (src, tid, pg) => realAdapter(src).category(src, tid, pg),
     detailOf, search: (src, wd, pg) => realAdapter(src).search(src, wd, pg),
