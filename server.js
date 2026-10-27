@@ -1026,6 +1026,155 @@ async function biliFetch(name, ep, duration) {
   return { xml: xml, matched: best.title.slice(0, 36) + tag + (mins ? ' · ' + mins + '分' : ''), count: count };
 }
 
+/* ---- 腾讯视频兜底(免凭证,2026-10-27 实测) ----
+ * B站对独播剧/番剧正片未登录搜不到 → 走腾讯补:
+ *   MbSearch 搜片名拿 cid(类型白名单+标题精确匹配优先)
+ *   → GetPageData(vsite_episode_list) 拿每集 vid(长番按 tabs 篇章全量取,is_trailer 过滤)
+ *   → 拼 PC 形态链接 https://v.qq.com/x/cover/<cid>/<vid>.html
+ *   → 交给公共弹幕库 danmu.zxz.ee 解析(它吐的就是 B站 XML 格式,解析器零改动)。
+ * 注意:腾讯只认上面这种 PC 链接形态;狂飙这类 sdp 型 cid 选集接口不认 → 拿不到就空手而归。 */
+const QQ_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const QQ_ZXXZ = 'https://danmu.zxz.ee';
+
+async function qqPost(url, body, referer) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', 'Origin': 'https://v.qq.com',
+      'Referer': referer || 'https://v.qq.com/', 'User-Agent': QQ_UA,
+      'Accept': 'application/json, text/plain, */*',
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await r.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (e) {}
+  return { status: r.status, json: json, text: text };
+}
+
+/* 搜索:返回去噪后的候选 [{cid,title,year,type,num}] */
+async function qqSearch(keyword) {
+  const r = await qqPost(
+    'https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.MultiTerminalSearch/MbSearch?vplatform=2',
+    {
+      version: '25071701', clientType: 1, filterValue: '',
+      uuid: '0379274D-05A0-4EB6-A89C-878C9A460426',
+      query: keyword, retry: 0, pagenum: 0, isPrefetch: true, pagesize: 30,
+      queryFrom: 0, searchDatakey: '', transInfo: '', isneedQc: true, preQid: '', adClientInfo: '',
+      extraInfo: { multi_terminal_pc: '1', themeType: '1', sugRelatedIds: '{}', appVersion: '' },
+    },
+    'https://v.qq.com/x/search/?q=' + encodeURIComponent(keyword) + '&stag=&smartbox_ab=');
+  if (!r.json || r.json.ret !== 0) return [];
+  const data = r.json.data || {};
+  let items = [];
+  for (const box of (data.areaBoxList || [])) {
+    if (box.boxId === 'MainNeed' && Array.isArray(box.itemList)) { items = box.itemList; break; }
+  }
+  if (!items.length && data.normalList && Array.isArray(data.normalList.itemList)) items = data.normalList.itemList;
+  const out = [];
+  for (const it of items) {
+    const vi = it.videoInfo || {}, doc = it.doc || {};
+    const cid = doc.id, title = String(vi.title || '').replace(/<[^>]+>/g, '').trim();
+    if (!cid || !title) continue;
+    out.push({ cid: cid, title: title, year: Number(vi.year) || 0, type: String(vi.typeName || ''),
+      num: Number((vi.subjectDoc || {}).videoNum) || 0 });
+  }
+  return out;
+}
+
+/* 挑正片专辑:类型白名单 + 解说/花絮排除 + 集数容量够 + 标题精确匹配优先(「斗罗大陆」不能错拿成「Ⅱ绝世唐门」) */
+function qqPickAlbum(items, name, epNo) {
+  const kw = String(name || '').replace(/\s+/g, '');
+  const cands = [];
+  for (const it of items) {
+    if (!it.year) continue;
+    if (!/^(电视剧|动漫|电影|纪录片|综艺|综艺节目)$/.test(it.type)) continue;
+    const tt = it.title.replace(/\s+/g, '');
+    if (DM_DENY.test(tt) || /短剧|预告/.test(tt)) continue;
+    if (it.type !== '电影' && it.num > 0 && epNo > 0 && it.num < epNo) continue;
+    let sc = 0;
+    if (tt === kw) sc = 1000;
+    else if (tt.startsWith(kw)) sc = 500;
+    else if (tt.includes(kw)) sc = 100;
+    else continue;
+    cands.push({ sc: sc, it: it });
+  }
+  cands.sort(function (a, b) { return b.sc - a.sc; });
+  return cands.length ? cands[0].it : null;
+}
+
+/* 选集:先 req_type=0 拿 tabs(长番按篇章分 tab),逐 tab 取全量;每集取 play_title/union_title/c_title_output 任一 */
+async function qqEpisodes(cid) {
+  const URL = 'https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2';
+  const seen = {}, eps = [];
+  async function once(ctx) {
+    const r = await qqPost(URL, { has_cache: 1, page_params: {
+      req_from: 'web_vsite', page_id: 'vsite_episode_list', page_type: 'detail_operation',
+      id_type: '1', page_size: '', cid: cid, vid: '', lid: '', page_num: '',
+      page_context: ctx, detail_page_type: '1' } }, 'https://v.qq.com/x/cover/' + cid + '.html');
+    const got = [], tabs = [];
+    const mlds = (r.json && r.json.data && r.json.data.module_list_datas) || [];
+    for (const mld of mlds) {
+      for (const md of (mld.module_datas || [])) {
+        const mp = md.module_params || {};
+        if (mp.tabs) { try { const t = JSON.parse(mp.tabs); if (Array.isArray(t)) tabs.push.apply(tabs, t); } catch (e) {} }
+        for (const x of ((md.item_data_lists || {}).item_datas || [])) {
+          const p = x.item_params || {};
+          if (p.vid && String(p.is_trailer) !== '1' && !seen[p.vid]) {
+            seen[p.vid] = 1;
+            got.push({ vid: p.vid, play: String(p.play_title || ''), union: String(p.union_title || ''),
+              ct: String(p.c_title_output || ''), t: String(p.title || '') });
+          }
+        }
+      }
+    }
+    return { got: got, tabs: tabs };
+  }
+  const first = await once('cid=' + cid + '&detail_page_type=1&req_from=web_vsite&req_from_second_type=&req_type=0');
+  eps.push.apply(eps, first.got);
+  for (const tab of first.tabs) {
+    if (!tab.page_context || eps.length >= 400) continue;
+    const t = await once(String(tab.page_context));
+    eps.push.apply(eps, t.got);
+  }
+  return eps;
+}
+
+/* 选集标题里的集数:复用 epNoOf(第N集/话/期,含中文数字),再兜底「xxx_05」尾缀 */
+function qqEpNo(text) {
+  const n = epNoOf(text);
+  if (n) return n;
+  const m = String(text || '').match(/[_\s]?0*(\d+)$/);
+  return m ? Number(m[1]) : 0;
+}
+
+async function qqFetch(name, ep, duration) {
+  const epNo = epNoOf(ep);
+  const items = await qqSearch(name);
+  const album = qqPickAlbum(items, name, epNo);
+  if (!album) return null;
+  const eps = await qqEpisodes(album.cid);
+  let hit = null;
+  if (epNo > 0) {
+    for (let i = 0; i < eps.length; i++) {
+      const e = eps[i];
+      if (e.vid && qqEpNo(e.play || e.union || e.ct || e.t) === epNo) { hit = e; break; }
+    }
+  }
+  if (!hit && eps.length === 1) hit = eps[0];
+  if (!hit) return null;
+  const link = 'https://v.qq.com/x/cover/' + album.cid + '/' + hit.vid + '.html';
+  const r = await fetch(QQ_ZXXZ + '/?type=xml&id=' + encodeURIComponent(link), { headers: { 'User-Agent': QQ_UA } });
+  let xml = await r.text();
+  if (r.status !== 200 || !/<d p=/.test(xml)) return null;
+  /* 去掉公共库的礼仪问候弹幕再计数 */
+  xml = xml.replace(/<d p="[^"]*"[^>]*>(?:(?!<\/d>)[\s\S])*(弹幕礼仪|正在赶来)(?:(?!<\/d>)[\s\S])*<\/d>/g, '');
+  const count = (xml.match(/<d p=/g) || []).length;
+  if (!count) return null;
+  const label = String(hit.play || '').trim() || (album.title + ' ' + (hit.union || hit.ct || hit.t)).trim();
+  return { xml: xml.slice(0, 3e6), from: 'tencent·公共弹幕库', matched: label.slice(0, 40), count: count };
+}
+
 /* ---- 弹弹play 官方(需 AppId/AppSecret) ---- */
 async function dandanFetch(fileName, body) {
   const base = String(body.base || DM_DEFAULT.base).replace(/\/+$/, '');
@@ -1093,14 +1242,25 @@ async function handleDm(req, res, u) {
       }
     }
 
-    /* 3) B站内置(免凭证) */
+    /* 3) B站内置(免凭证)。命中但弹幕极少(<30)多半是错配的冷门上传(如「斗罗大陆」抓成
+     *    「绝世唐门」单集)——先不急着回,继续走腾讯兜底,谁弹幕多用谁 */
+    let dmErr = '', bili = null;
     try {
-      const r = await biliFetch(name || fileName, ep, duration);
-      if (r) return jout(res, 200, { xml: r.xml, from: 'bilibili', matched: r.matched, count: r.count });
-      return jout(res, 200, { error: '没找到匹配的弹幕' + (body._dandanErr ? '(' + body._dandanErr + ')' : '(B站没有这一集的上传)') });
+      bili = await biliFetch(name || fileName, ep, duration);
+      if (bili && bili.count >= 30) return jout(res, 200, { xml: bili.xml, from: 'bilibili', matched: bili.matched, count: bili.count });
     } catch (e) {
-      return jout(res, 200, { error: '弹幕获取失败:' + e.message });
+      dmErr = 'B站:' + e.message;
     }
+
+    /* 4) 腾讯兜底(公共弹幕库): B站搜不到的独播剧/番剧在这里补 */
+    try {
+      const r = await qqFetch(name || fileName, ep, duration);
+      if (r && (!bili || r.count > bili.count)) return jout(res, 200, { xml: r.xml, from: r.from, matched: r.matched, count: r.count });
+    } catch (e) {
+      dmErr = dmErr ? dmErr + ';腾讯:' + e.message : '腾讯:' + e.message;
+    }
+    if (bili) return jout(res, 200, { xml: bili.xml, from: 'bilibili', matched: bili.matched, count: bili.count });
+    return jout(res, 200, { error: '没找到匹配的弹幕' + (body._dandanErr ? '(' + body._dandanErr + ')' : (dmErr ? '(' + dmErr + ')' : '')) });
   } catch (e) {
     return jout(res, 502, { error: e.message });
   }

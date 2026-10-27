@@ -26,6 +26,11 @@ import org.json.JSONObject;
  * 页面(file://源)通过 http://127.0.0.1:9978 前缀访问,CORS 全开。
  */
 public class MiniServer {
+    static {
+        /* 双栈域名优先 IPv6:模拟器/部分家宽的 IPv4 NAT 路径到 Cloudflare 极慢(实测单请求 7s+),
+           Java 默认按系统排序逐地址尝试会挂在慢路径上;IPv6 路径实测快一半。真机上无害。 */
+        System.setProperty("java.net.preferIPv6Addresses", "true");
+    }
     private static final int PORT = 9978;
     private static final String UA_PC =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -33,6 +38,11 @@ public class MiniServer {
     private static final String ALI_OPEN = "https://openapi.aliyundrive.com";
 
     private static Context ctx;
+    /* 弹幕缓存:键 = 片名|集数,值 = {xml, from, matched, count} */
+    private static final java.util.LinkedHashMap<String, String[]> DM_CACHE =
+        new java.util.LinkedHashMap<String, String[]>(16, 0.75f, true) {
+            protected boolean removeEldest(java.util.Map.Entry<String, String[]> e) { return size() > 20; }
+        };
     private static String rcState = "{\"ended\":true}";
     private static final List<String> rcCmds = Collections.synchronizedList(new ArrayList<String>());
     private static long rcSeq = 0;
@@ -421,8 +431,19 @@ public class MiniServer {
                     String ep = q0.optString("ep", "").trim();
                     double dur = q0.optDouble("duration", 0);
                     if (fileName.isEmpty() && name.isEmpty()) { json(sk, 200, "{\"error\":\"缺少片名\"}"); return; }
+                    /* 弹幕缓存:公益链路在慢网络下要几十秒,同一集(片名+集数)只真正拉一次,
+                       重开/回看/手动重试直接秒回。LRU 20 条,重启即清(下次开机重新匹配)。 */
+                    String dmKey = (name.isEmpty() ? fileName : name) + "|" + ep;
+                    synchronized (DM_CACHE) {
+                        String[] hit = DM_CACHE.get(dmKey);
+                        if (hit != null) {
+                            json(sk, 200, "{\"xml\":\"" + esc(hit[0]) + "\",\"from\":\"" + hit[1]
+                                + "\",\"matched\":\"" + esc(hit[2]) + "\",\"count\":" + hit[3] + ",\"cached\":true}");
+                            return;
+                        }
+                    }
                     String tpl = q0.optString("tpl", "");
-                    String xml = null, from = "", dErr = "";
+                    String xml = null, from = "", dErr = "", gyErr = "";
                     lastDmMatch = "";
                     if (tpl.startsWith("http")) {
                         String u = tpl.replace("{fileName}", java.net.URLEncoder.encode(fileName.isEmpty() ? name : fileName, "utf-8"))
@@ -493,7 +514,7 @@ public class MiniServer {
                                     xml = gongyiDm(name.isEmpty() ? fileName : name, ep,
                                         gy.startsWith("http") ? gy : "");
                                     if (xml != null) from = "gongyi";
-                                } catch (Throwable t) { dErr = "公益:" + t.getMessage(); }
+                                } catch (Throwable t) { gyErr = String.valueOf(t.getMessage()); }
                             }
                         }
                         if (xml == null) {
@@ -501,8 +522,22 @@ public class MiniServer {
                                 xml = biliDm(name.isEmpty() ? fileName : name, ep, dur);
                                 if (xml != null) from = "bilibili";
                             } catch (Throwable t) {
-                                json(sk, 200, "{\"error\":\"弹幕获取失败:" + esc(String.valueOf(t.getMessage())) + "\"}");
-                                return;
+                                dErr = "B站:" + String.valueOf(t.getMessage());
+                            }
+                        }
+                        /* 腾讯兜底(公共弹幕库 danmu.zxz.ee):
+                           B站没拿到,或弹幕极少(<30,多半是错配的冷门单集,如「斗罗大陆」抓成「绝世唐门」)
+                           → 走腾讯搜索+公共弹幕库,谁弹幕多用谁。独播剧/番剧正片(斗罗大陆/庆余年类)在这补。 */
+                        int biliCnt = 0;
+                        for (int i = xml == null ? -1 : xml.indexOf("<d p="); i >= 0; i = xml.indexOf("<d p=", i + 1)) biliCnt++;
+                        if (xml == null || biliCnt < 30) {
+                            String txml = null;
+                            try { txml = qqDm(name.isEmpty() ? fileName : name, ep); }
+                            catch (Throwable t) { dErr = dErr.isEmpty() ? "腾讯:" + t.getMessage() : dErr + ";腾讯:" + t.getMessage(); }
+                            if (txml != null) {
+                                int tcnt = 0;
+                                for (int i = txml.indexOf("<d p="); i >= 0; i = txml.indexOf("<d p=", i + 1)) tcnt++;
+                                if (xml == null || tcnt > biliCnt) { xml = txml; from = "tencent·公共弹幕库"; }
                             }
                         }
                         if (xml == null) {
@@ -513,7 +548,11 @@ public class MiniServer {
                     String cut = xml.substring(0, Math.min(xml.length(), 3000000));
                     int count = 0;
                     for (int i = cut.indexOf("<d p="); i >= 0; i = cut.indexOf("<d p=", i + 1)) count++;
-                    json(sk, 200, "{\"xml\":\"" + esc(cut) + "\",\"from\":\"" + from + "\",\"matched\":\"" + esc(lastDmMatch) + "\",\"count\":" + count + "}");
+                    synchronized (DM_CACHE) { DM_CACHE.put(dmKey, new String[]{cut, from, lastDmMatch, String.valueOf(count)}); }
+                    json(sk, 200, "{\"xml\":\"" + esc(cut) + "\",\"from\":\"" + from + "\",\"matched\":\"" + esc(lastDmMatch)
+                        + "\",\"count\":" + count
+                        + (gyErr.isEmpty() ? "" : ",\"gyErr\":\"" + esc(gyErr.length() > 140 ? gyErr.substring(0, 140) : gyErr) + "\"")
+                        + "}");
                 } catch (Throwable t) { json(sk, 502, "{\"error\":\"" + esc(String.valueOf(t.getMessage())) + "\"}"); }
                 return;
             }
@@ -1059,8 +1098,11 @@ public class MiniServer {
         return new String(b.toByteArray(), "utf-8");
     }
     private static String httpText(String method, String urlStr, String body, java.util.Map<String, String> headers) throws Exception {
+        return httpText(method, urlStr, body, headers, 15000, 30000);
+    }
+    private static String httpText(String method, String urlStr, String body, java.util.Map<String, String> headers, int connTo, int readTo) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
-        c.setConnectTimeout(15000); c.setReadTimeout(30000);
+        c.setConnectTimeout(connTo); c.setReadTimeout(readTo);
         c.setRequestMethod(method);
         c.setRequestProperty("User-Agent", UA_PC);
         if (headers != null) for (String k : headers.keySet()) c.setRequestProperty(k, headers.get(k));
@@ -1396,13 +1438,21 @@ public class MiniServer {
     private static final String GY_BASE_DEFAULT = "https://danmaku-api.152468.xyz";
 
     private static String gongyiDm(String name, String ep, String base) throws Exception {
+        long t0 = System.currentTimeMillis();
         if (base == null || base.trim().isEmpty()) base = GY_BASE_DEFAULT;
         base = base.trim().replaceAll("/+$", "");
         java.util.Map<String, String> h = new java.util.HashMap<>();
         h.put("User-Agent", "AMUTV/1.4");
         h.put("Accept", "application/json");
-        org.json.JSONObject s = new org.json.JSONObject(httpText("GET",
-            base + "/api/v2/search/anime?keyword=" + java.net.URLEncoder.encode(name, "utf-8"), null, h));
+        /* 公益代理在部分网络下 IPv4 路径 RTT 极高(实测 >1.5s),15s 连接超时不够,放宽到 25s/40s */
+        String sbody = httpText("GET",
+            base + "/api/v2/search/anime?keyword=" + java.net.URLEncoder.encode(name, "utf-8"), null, h, 25000, 40000);
+        System.out.println("GY search " + (System.currentTimeMillis() - t0) + "ms len=" + sbody.length());
+        org.json.JSONObject s;
+        try { s = new org.json.JSONObject(sbody); }
+        catch (Exception e) { /* CF质询/HTML错误页:把原文开头带出来,排障一眼可见 */
+            throw new Exception("公益接口非JSON:" + sbody.replaceAll("\\s+", " ")
+                .substring(0, Math.min(90, sbody.length()))); }
         org.json.JSONArray as = s.optJSONArray("animes");
         if (as == null || as.length() == 0) return null;
         long aid = 0;
@@ -1411,7 +1461,7 @@ public class MiniServer {
             if (a0 != null && a0.optLong("animeId", 0) > 0) { aid = a0.optLong("animeId"); break; }
         }
         if (aid <= 0) return null;
-        org.json.JSONObject bg = new org.json.JSONObject(httpText("GET", base + "/api/v2/bangumi/" + aid, null, h))
+        org.json.JSONObject bg = new org.json.JSONObject(httpText("GET", base + "/api/v2/bangumi/" + aid, null, h, 25000, 40000))
             .optJSONObject("bangumi");
         if (bg == null) return null;
         org.json.JSONArray eps = bg.optJSONArray("episodes");
@@ -1432,8 +1482,10 @@ public class MiniServer {
         long eid = pick.optLong("episodeId", 0);
         if (eid <= 0) return null;
         lastDmMatch = bg.optString("animeTitle", "") + " · " + pick.optString("episodeTitle", "");
+        System.out.println("GY bangumi " + (System.currentTimeMillis() - t0) + "ms match=" + lastDmMatch);
         org.json.JSONObject cc = new org.json.JSONObject(httpText("GET",
-            base + "/api/v2/comment/" + eid + "?withRelated=true&chConvert=1", null, h));
+            base + "/api/v2/comment/" + eid + "?withRelated=true&chConvert=1", null, h, 25000, 40000));
+        System.out.println("GY comment " + (System.currentTimeMillis() - t0) + "ms");
         org.json.JSONArray cs = cc.optJSONArray("comments");
         if (cs == null || cs.length() == 0) return null;
         StringBuilder b = new StringBuilder("<?xml version=\"1.0\"?><i>");
@@ -1575,5 +1627,230 @@ public class MiniServer {
             } catch (Throwable ignored) {}
         }
         return s;
+    }
+
+    /* ================= 弹幕:腾讯视频兜底(公共弹幕库,免凭证) =================
+     * B站对独播剧/番剧正片未登录搜不到 → 走腾讯补:
+     *   MbSearch 搜片名拿 cid(类型白名单 + 标题精确匹配优先,防「斗罗大陆」错拿成「Ⅱ绝世唐门」)
+     *   → GetPageData(vsite_episode_list,req_type=0) 拿 tabs(长番按篇章),逐 tab 取全量分集 vid
+     *   → 拼 PC 形态链接 https://v.qq.com/x/cover/<cid>/<vid>.html
+     *   → 交给公共弹幕库 danmu.zxz.ee 解析(返回即 B站 XML 格式,前端解析器零改动)。
+     * 注意:腾讯只认这种 PC 链接形态;狂飙类 sdp 型 cid 选集接口不认 → 拿不到就空手而归。
+     * 2026-10-27 PC 实测:斗罗大陆 E5/E130(466/481 条)、庆余年 E1/第二季 E10(各 658 条)。 */
+    private static final String QQ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    private static org.json.JSONObject qqPost(String url, String body, String referer) throws Exception {
+        long t0 = System.currentTimeMillis();
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(20000);
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json");
+        c.setRequestProperty("Origin", "https://v.qq.com");
+        c.setRequestProperty("Referer", referer == null ? "https://v.qq.com/" : referer);
+        c.setRequestProperty("User-Agent", QQ_UA);
+        c.setRequestProperty("Accept", "application/json, text/plain, */*");
+        java.io.OutputStream os = c.getOutputStream();
+        os.write(body.getBytes("utf-8"));
+        os.close();
+        int code = c.getResponseCode();
+        InputStream is = (code >= 400 && c.getErrorStream() != null) ? c.getErrorStream() : c.getInputStream();
+        String s = readAll(is);
+        bLog("QQPOST " + url.replaceAll("^https://[^/]+", "").substring(0, Math.min(60, url.replaceAll("^https://[^/]+", "").length()))
+            + " -> " + code + " " + (System.currentTimeMillis() - t0) + "ms len=" + s.length());
+        try { return new org.json.JSONObject(s); } catch (Throwable t) { return new org.json.JSONObject(); }
+    }
+
+    private static java.util.List<org.json.JSONObject> jsonObjList(org.json.JSONArray a) {
+        java.util.List<org.json.JSONObject> l = new java.util.ArrayList<>();
+        for (int i = 0; a != null && i < a.length(); i++) {
+            org.json.JSONObject o = a.optJSONObject(i);
+            if (o != null) l.add(o);
+        }
+        return l;
+    }
+
+    /* 搜索:返回去噪候选 [{cid,title,year,type,num}] */
+    private static org.json.JSONArray qqSearch(String keyword) throws Exception {
+        org.json.JSONObject extra = new org.json.JSONObject()
+            .put("multi_terminal_pc", "1").put("themeType", "1").put("sugRelatedIds", "{}").put("appVersion", "");
+        org.json.JSONObject payload = new org.json.JSONObject()
+            .put("version", "25071701").put("clientType", 1).put("filterValue", "")
+            .put("uuid", "0379274D-05A0-4EB6-A89C-878C9A460426")
+            .put("query", keyword).put("retry", 0).put("pagenum", 0).put("isPrefetch", true)
+            .put("pagesize", 30).put("queryFrom", 0).put("searchDatakey", "").put("transInfo", "")
+            .put("isneedQc", true).put("preQid", "").put("adClientInfo", "")
+            .put("extraInfo", extra);
+        org.json.JSONObject r = qqPost(
+            "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.MultiTerminalSearch/MbSearch?vplatform=2",
+            payload.toString(),
+            "https://v.qq.com/x/search/?q=" + urlEnc(keyword) + "&stag=&smartbox_ab=");
+        org.json.JSONArray out = new org.json.JSONArray();
+        if (r.optInt("ret", -1) != 0) return out;
+        org.json.JSONObject data = r.optJSONObject("data");
+        if (data == null) return out;
+        java.util.List<org.json.JSONObject> items = new java.util.ArrayList<>();
+        org.json.JSONArray boxes = data.optJSONArray("areaBoxList");
+        if (boxes != null) {
+            for (int i = 0; i < boxes.length(); i++) {
+                org.json.JSONObject box = boxes.optJSONObject(i);
+                if (box != null && "MainNeed".equals(box.optString("boxId")) && box.optJSONArray("itemList") != null) {
+                    items = jsonObjList(box.optJSONArray("itemList"));
+                    break;
+                }
+            }
+        }
+        if (items.isEmpty()) {
+            org.json.JSONObject nl = data.optJSONObject("normalList");
+            if (nl != null && nl.optJSONArray("itemList") != null) items = jsonObjList(nl.optJSONArray("itemList"));
+        }
+        for (org.json.JSONObject it : items) {
+            org.json.JSONObject vi = it.optJSONObject("videoInfo"), doc = it.optJSONObject("doc");
+            if (vi == null || doc == null) continue;
+            String cid = doc.optString("id");
+            String title = vi.optString("title").replaceAll("<[^>]+>", "").trim();
+            if (cid.isEmpty() || title.isEmpty()) continue;
+            org.json.JSONObject o = new org.json.JSONObject()
+                .put("cid", cid).put("title", title).put("year", vi.optLong("year"))
+                .put("type", vi.optString("typeName"))
+                .put("num", vi.optJSONObject("subjectDoc") == null ? 0 : vi.optJSONObject("subjectDoc").optLong("videoNum"));
+            out.put(o);
+        }
+        return out;
+    }
+
+    /* 挑正片专辑:类型白名单 + 解说/花絮排除 + 集数容量够 + 标题精确匹配优先 */
+    private static org.json.JSONObject qqPickAlbum(org.json.JSONArray items, String name, int epNo) {
+        String kw = name == null ? "" : name.replaceAll("\\s+", "");
+        org.json.JSONObject best = null;
+        int bestSc = -1;
+        final java.util.List<String> ALLOWED = java.util.Arrays.asList("电视剧", "动漫", "电影", "纪录片", "综艺", "综艺节目");
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            if (it.optLong("year") == 0) continue;
+            String type = it.optString("type");
+            if (!ALLOWED.contains(type)) continue;
+            String tt = it.optString("title").replaceAll("\\s+", "");
+            if (DM_DENY.matcher(tt).find() || tt.contains("短剧") || tt.contains("预告")) continue;
+            if (!"电影".equals(type) && it.optLong("num") > 0 && epNo > 0 && it.optLong("num") < epNo) continue;
+            int sc;
+            if (tt.equals(kw)) sc = 1000;
+            else if (tt.startsWith(kw)) sc = 500;
+            else if (tt.contains(kw)) sc = 100;
+            else continue;
+            if (sc > bestSc) { bestSc = sc; best = it; }
+        }
+        return best;
+    }
+
+    /* 选集:先 req_type=0 拿 tabs(长番按篇章分 tab),逐 tab 取全量;is_trailer 过滤;防御上限 400 集 */
+    private static org.json.JSONArray qqEpisodes(String cid) throws Exception {
+        final String URL = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2";
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        org.json.JSONArray eps = new org.json.JSONArray();
+        java.util.List<String> ctxs = new java.util.ArrayList<>();
+        ctxs.add("cid=" + cid + "&detail_page_type=1&req_from=web_vsite&req_from_second_type=&req_type=0");
+        for (int round = 0; round < 12 && !ctxs.isEmpty() && eps.length() < 400; round++) {
+            String ctx = ctxs.remove(0);
+            org.json.JSONObject body = new org.json.JSONObject().put("has_cache", 1)
+                .put("page_params", new org.json.JSONObject()
+                    .put("req_from", "web_vsite").put("page_id", "vsite_episode_list")
+                    .put("page_type", "detail_operation").put("id_type", "1").put("page_size", "")
+                    .put("cid", cid).put("vid", "").put("lid", "").put("page_num", "")
+                    .put("page_context", ctx).put("detail_page_type", "1"));
+            org.json.JSONObject r = qqPost(URL, body.toString(), "https://v.qq.com/x/cover/" + cid + ".html");
+            org.json.JSONObject data = r.optJSONObject("data");
+            if (data == null) continue;
+            org.json.JSONArray mlds = data.optJSONArray("module_list_datas");
+            if (mlds == null) continue;
+            for (int i = 0; i < mlds.length(); i++) {
+                org.json.JSONObject mld = mlds.optJSONObject(i);
+                if (mld == null) continue;
+                org.json.JSONArray mds = mld.optJSONArray("module_datas");
+                if (mds == null) continue;
+                for (int j = 0; j < mds.length(); j++) {
+                    org.json.JSONObject md = mds.optJSONObject(j);
+                    if (md == null) continue;
+                    org.json.JSONObject mp = md.optJSONObject("module_params");
+                    if (mp != null && !mp.optString("tabs").isEmpty()) {
+                        try {
+                            for (org.json.JSONObject tab : jsonObjList(new org.json.JSONArray(mp.optString("tabs")))) {
+                                String pc = tab.optString("page_context");
+                                if (!pc.isEmpty()) ctxs.add(pc);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    org.json.JSONArray its = md.optJSONObject("item_data_lists") == null
+                        ? null : md.optJSONObject("item_data_lists").optJSONArray("item_datas");
+                    for (int k = 0; its != null && k < its.length(); k++) {
+                        org.json.JSONObject x = its.optJSONObject(k);
+                        if (x == null) continue;
+                        org.json.JSONObject p = x.optJSONObject("item_params");
+                        if (p == null) continue;
+                        String vid = p.optString("vid");
+                        if (vid.isEmpty() || "1".equals(p.optString("is_trailer")) || seen.contains(vid)) continue;
+                        seen.add(vid);
+                        eps.put(new org.json.JSONObject()
+                            .put("vid", vid).put("play", p.optString("play_title"))
+                            .put("union", p.optString("union_title")).put("ct", p.optString("c_title_output"))
+                            .put("t", p.optString("title")));
+                    }
+                }
+            }
+        }
+        return eps;
+    }
+
+    /* 选集标题里的集数:复用 epNoOf(第N集/话/期,含中文数字),再兜底「xxx_05」尾缀 */
+    private static int qqEpNo(String t) {
+        int n = epNoOf(t);
+        if (n > 0) return n;
+        if (t == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[_\\s]?0*(\\d+)$").matcher(t.trim());
+        if (m.find()) { try { return Integer.parseInt(m.group(1)); } catch (Throwable ignored) {} }
+        return 0;
+    }
+
+    private static String qqDm(String name, String ep) throws Exception {
+        long t0 = System.currentTimeMillis();
+        final int epNo = epNoOf(ep);
+        org.json.JSONArray items = qqSearch(name);
+        bLog("qq search \"" + name + "\" -> " + items.length() + " @" + (System.currentTimeMillis() - t0) + "ms");
+        org.json.JSONObject album = qqPickAlbum(items, name, epNo);
+        if (album == null) { bLog("qq no album, give up @" + (System.currentTimeMillis() - t0) + "ms"); return null; }
+        org.json.JSONArray eps = qqEpisodes(album.optString("cid"));
+        bLog("qq album=" + album.optString("title") + "(" + album.optString("cid") + ") eps=" + eps.length()
+            + " @" + (System.currentTimeMillis() - t0) + "ms");
+        String vid = null, hitTitle = "";
+        if (epNo > 0) {
+            for (int i = 0; i < eps.length(); i++) {
+                org.json.JSONObject e = eps.optJSONObject(i);
+                if (e == null) continue;
+                String lab = !e.optString("play").isEmpty() ? e.optString("play")
+                    : (!e.optString("union").isEmpty() ? e.optString("union")
+                    : (!e.optString("ct").isEmpty() ? e.optString("ct") : e.optString("t")));
+                if (qqEpNo(lab) == epNo) { vid = e.optString("vid"); hitTitle = lab; break; }
+            }
+        }
+        if (vid == null && eps.length() == 1) {
+            vid = eps.optJSONObject(0).optString("vid");
+            hitTitle = album.optString("title");
+        }
+        if (vid == null || vid.isEmpty()) { bLog("qq no ep " + epNo + " in " + eps.length() + " eps"); return null; }
+        String link = "https://v.qq.com/x/cover/" + album.optString("cid") + "/" + vid + ".html";
+        HttpURLConnection c = (HttpURLConnection) new URL("https://danmu.zxz.ee/?type=xml&id=" + urlEnc(link)).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(25000);
+        c.setRequestProperty("User-Agent", QQ_UA);
+        int code = c.getResponseCode();
+        String xml = (code >= 400 && c.getErrorStream() != null) ? readAll(c.getErrorStream()) : readAll(c.getInputStream());
+        bLog("qq zxz -> " + code + " len=" + xml.length() + " @" + (System.currentTimeMillis() - t0) + "ms");
+        if (code != 200 || !xml.contains("<d p=")) return null;
+        xml = xml.replaceAll("<d p=\"[^\"]*\"[^>]*>(?:(?!</d>)[\\s\\S])*(弹幕礼仪|正在赶来)(?:(?!</d>)[\\s\\S])*</d>", "");
+        if (!xml.contains("<d p=")) return null;
+        lastDmMatch = hitTitle;
+        return xml;
     }
 }
