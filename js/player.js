@@ -199,6 +199,7 @@ const Player = (() => {
           <button class="tp-btn tp-play" data-act="play" data-f tabindex="-1">${I.pause}</button>
           <button class="tp-btn" data-act="ff" data-f tabindex="-1"><span class="tp-ic">${I.ff}</span><span class="tp-sub">15秒</span></button>
           <button class="tp-btn" data-act="next" data-f tabindex="-1"><span class="tp-ic">${I.next}</span><span class="tp-sub" id="tp-next">下一集</span></button>
+          <button class="tp-btn tp-voice" data-act="voice" data-f tabindex="-1" title="语音控制"><span class="tp-ic">🎤</span><span class="tp-sub">语音</span></button>
         </div>
         <div class="pl-chips">
           <button class="pill" data-act="eps" data-f tabindex="-1">选集<span class="pv" id="pv-eps">-</span></button>
@@ -242,6 +243,7 @@ const Player = (() => {
         else if (act === 'ff') seekBy(SEEK);
         else if (act === 'prev') switchEp(-1);
         else if (act === 'next') switchEp(1);
+        else if (act === 'voice') { if (window.Voice) window.Voice.start(); }
         else if (act === 'eps') toggleDrawer();
         else if (act === 'src') toggleSourcePanel();
         else if (act === 'sniff') toggleSniff();
@@ -418,6 +420,7 @@ const Player = (() => {
         case 'seek': seekBy(Number(c.arg) || 0); break;
         case 'settime': video.currentTime = Number(c.arg) || 0; break;
         case 'vol': video.volume = Math.min(1, Math.max(0, Number(c.arg))); break;
+        case 'mute': video.muted = (c.arg === false) ? false : true; updateVolUI(); break;
         case 'rate': video.playbackRate = Number(c.arg) || 1; break;
         case 'next': switchEp(1); break;
         case 'prev': switchEp(-1); break;
@@ -1824,6 +1827,8 @@ const Player = (() => {
   /* ---------- 快捷键 ---------- */
   function playerKeys(e) {
     if (!root) return;
+    /* 语音面板盖在最上层时,方向键/空格留给面板,否则会同时触发播放器快进 */
+    if (document.querySelector('.vc-mask')) return;
     poke();
     const k = e.key;
     const ae = document.activeElement;
@@ -1932,5 +1937,20 @@ const Player = (() => {
 
   function isOpen() { return !!root; }
 
-  return { open, close, isOpen };
+  /* 语音控制入口:复用遥控协议的执行器,并暴露只读状态供增量指令(音量±/快进±)计算 */
+  function getState() {
+    if (!video || !state) return null;
+    return {
+      volume: video.muted ? 0 : video.volume,
+      muted: !!video.muted,
+      rate: video.playbackRate || 1,
+      paused: !!video.paused,
+      groupIndex: state.groupIndex,
+      epIndex: state.epIndex,
+      groupCount: state.groups ? state.groups.length : 0,
+      epCount: (state.groups && state.groups[state.groupIndex]) ? state.groups[state.groupIndex].eps.length : 0
+    };
+  }
+
+  return { open, close, isOpen, ctrl: rcExec, getState: getState };
 })();
