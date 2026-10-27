@@ -1,0 +1,14 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10,
+demo.mp4?seg=1
+#EXT-X-CUE-OUT:20
+#EXTINF:10,
+ad/clip-a.mp4
+#EXTINF:10,
+ad/clip-b.mp4
+#EXT-X-CUE-IN
+#EXTINF:10,
+demo.mp4?seg=2
+#EXT-X-ENDLIST

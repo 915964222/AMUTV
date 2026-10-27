@@ -389,7 +389,9 @@ const Player = (() => {
   }
 
   /* ---------- 局域网 Web 遥控:状态上报给本机服务 + 执行手机端命令 ---------- */
-  const RC_SRV = location.protocol === 'file:' ? 'http://127.0.0.1:9978' : '';
+  /* 注意:必须用 localhost 而不是 127.0.0.1 —— Chromium 按 host 字符串分连接池(每 host 6 条),
+     /rc/poll 是长轮询会长期占住连接;与 API(sniff2/proxy 等)分池,否则换源嗅探等请求会被饿死挂起 */
+  const RC_SRV = location.protocol === 'file:' ? 'http://localhost:9978' : '';
   let rcTimer = null, rcSince = 0;
   function rcReport() {
     if (!video || !state || !state.groups) return;
@@ -469,14 +471,12 @@ const Player = (() => {
            抽到就走正常 HLS/MP4 播放,抽不到才退回 iframe 兜底 */
         let direct = '';
         try {
-          console.log('[player] sniff start', ep.url);
           direct = sniffCache[ep.url] || '';
           if (!direct) {
             direct = await API.sniffResolve(ep.url);
             if (direct) sniffCache[ep.url] = direct;
           }
-          console.log('[player] sniff done', direct || '(none)');
-        } catch (_e) { console.log('[player] sniff err', (_e && _e.message) || _e); }
+        } catch (_e) {}
         if (direct && /\.(m3u8|mp4)(\?|$)/i.test(direct)) {
           url = DB.getConfig().proxyMode ? API.proxied(direct) : direct;
           isHls = /\.m3u8(\?|$)/i.test(direct);
@@ -508,6 +508,7 @@ const Player = (() => {
         // 广告切片过滤 loader:包装默认 loader,对 playlist 响应做 m3u8 文本过滤
         const adFilterLoader = (window.AdFilter && DB.getConfig().adFilter !== false) ? (function () {
           const Base = Hls.DefaultConfig.loader;
+          const seen = {};  // 同一播放列表只提示一次(直播每几秒刷新一次,避免刷屏)
           return class AdFilterLoader extends Base {
             load(context, config, callbacks) {
               if (callbacks && typeof callbacks.onSuccess === 'function') {
@@ -515,8 +516,14 @@ const Player = (() => {
                 callbacks.onSuccess = function (response, stats, ctx2, net) {
                   try {
                     if (response && response.data && /#EXTM3U/.test(response.data)) {
-                      const r = window.AdFilter.filterM3U8(response.data);
-                      if (r.removed > 0) { response.data = r.text; if (window.toast) toast('已过滤 ' + r.removed + ' 个广告切片'); }
+                      /* 传入播放列表自身的 URL:结构性广告检测要把相对切片解析成绝对地址后比目录 */
+                      const base = (response.url) || (ctx2 && ctx2.url) || (context && context.url) || '';
+                      const r = window.AdFilter.filterM3U8(response.data, base);
+                      if (r.removed > 0) {
+                        response.data = r.text;
+                        const key = base.split('?')[0];
+                        if (window.toast && !seen[key]) { seen[key] = 1; toast('已过滤 ' + r.removed + ' 个广告切片'); }
+                      }
                     }
                   } catch (_e) {}
                   origSuccess(response, stats, ctx2, net);
@@ -793,20 +800,29 @@ const Player = (() => {
     const q = root.querySelector('#st-qual');
     if (!q) return;
     let txt = '';
+    let auto = false;
     if (hls && hls.levels && hls.levels.length) {
       const lv = hls.levels[hls.currentLevel] || hls.levels[hls.loadLevel];
       if (lv) {
         const h = lv.height || 0;
-        txt = h >= 2160 ? '4K' : h >= 1080 ? '1080P' : h >= 720 ? '720P' : h >= 480 ? '480P' : Math.round(lv.bitrate / 1000) + 'K';
+        /* 档位阈值按真实像素高度:1080 档从 1000 起(兼容 1088/1080),
+           720 档从 700 起,避免 1088 被误判成 4K、608 被误判成 1080 */
+        txt = h >= 2000 ? '4K' : h >= 1000 ? '1080P' : h >= 700 ? '720P' : h >= 500 ? '480P' : (h ? h + 'P' : Math.round(lv.bitrate / 1000) + 'K');
         const fr = Number(lv.frameRate || (lv.attrs && lv.attrs['FRAME-RATE']) || 0);
         if (fr >= 50) txt += '/' + Math.round(fr);
         const vr = lv.videoRange || (lv.attrs && lv.attrs['VIDEO-RANGE']) || '';
         if (vr && vr !== 'SDR') txt += ' ' + (vr === 'PQ' ? 'HDR' : vr);
-        if (hls.autoLevelEnabled) txt += '·自动';
+        auto = !!hls.autoLevelEnabled;
       }
-    } else if (video.videoHeight) {
-      txt = video.videoHeight >= 2160 ? '4K' : video.videoHeight + 'P';
     }
+    /* 清单声明的 RESOLUTION 常与实际转码分辨率不符(标 1920x1080 实为 466p 上采样),
+       所以已解码出画面时以 video.videoHeight(真实像素高度)为准。 */
+    if (video.videoHeight) {
+      const vh = video.videoHeight;
+      const real = vh >= 2000 ? '4K' : vh >= 1000 ? '1080P' : vh >= 700 ? '720P' : vh >= 500 ? '480P' : vh + 'P';
+      txt = real;
+    }
+    if (auto) txt += '·自动';
     q.textContent = txt;
     q.style.display = txt ? '' : 'none';
   }
@@ -1190,6 +1206,7 @@ const Player = (() => {
     let lastTick = -1, lastTickAt = Date.now();
     state._progressTimer = setInterval(() => {
       if (!root || !video || iframe) return;
+      if (video.paused) return;          // 用户主动暂停不算卡死
       const t = video.currentTime || 0;
       if (t !== lastTick) { lastTick = t; lastTickAt = Date.now(); return; }
       /* 时间不动持续 25 秒 → 视为卡死 */

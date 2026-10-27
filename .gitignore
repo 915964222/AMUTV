@@ -7,3 +7,16 @@ node_modules/
 Thumbs.db
 server.log
 android/assets-flat/
+
+# 运行/调试产物
+*.log
+.tmp/
+.workbuddy/
+.workbuddy-ai/
+verify1080.html
+
+# 本地签名(每台机器各自生成,不入库)
+tv-debug.keystore
+
+# 探测产物(会过期,不入库)
+tools/probe-results.json

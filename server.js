@@ -199,7 +199,7 @@ function handleProxy(req, res, u) {
         up.stream.on('data', c => { m3u8 += c; });
         up.stream.on('end', () => {
           try {
-            let out = AdFilter.filterM3U8(m3u8).text;
+            let out = AdFilter.filterM3U8(m3u8, target).text;
             out = rewriteM3U8Urls(out, target);
             delete headers['content-length'];
             if (!res.headersSent) res.writeHead(up.status, headers);
@@ -622,6 +622,57 @@ function probeMedia(url, ref) {
   });
 }
 
+/* 读取 m3u8 头,返回最高分辨率高度(px)。非 m3u8 或读不到返回 0
+   注意:很多源写 RESOLUTION=1080x608(宽 1080 高 608),这是伪 1080,
+   真实像素高度只有 608(约 480p)。所以只用高度判档位,宽度会骗人。 */
+function probeResolution(url, ref) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(url); } catch { return resolve(0); }
+    const mod = u.protocol === 'http:' ? http : https;
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0', 'accept': '*/*' };
+    if (ref) headers.referer = ref;
+    let done = false;
+    const finish = (h) => { if (!done) { done = true; resolve(h); } };
+    const req = mod.request(u, { headers, timeout: 10000 }, (res) => {
+      let buf = '';
+      res.on('data', (c) => {
+        buf += c.toString('utf8');
+        const re = /RESOLUTION=(\d+)x(\d+)/gi;
+        let m, best = 0;
+        while ((m = re.exec(buf))) {
+          const hh = parseInt(m[2], 10) || 0;   // 只取高度
+          if (hh > best) best = hh;
+        }
+        if (best) { res.destroy(); return finish(best); }
+        if (buf.length > 64 * 1024) { res.destroy(); return finish(0); }
+      });
+      res.on('end', () => {
+        const re = /RESOLUTION=(\d+)x(\d+)/gi;
+        let m, best = 0;
+        while ((m = re.exec(buf))) {
+          const hh = parseInt(m[2], 10) || 0;
+          if (hh > best) best = hh;
+        }
+        finish(best);
+      });
+      res.on('close', () => {
+        const re = /RESOLUTION=(\d+)x(\d+)/gi;
+        let m, best = 0;
+        while ((m = re.exec(buf))) {
+          const hh = parseInt(m[2], 10) || 0;
+          if (hh > best) best = hh;
+        }
+        finish(best);
+      });
+      res.on('error', () => finish(0));
+    });
+    req.on('timeout', () => { req.destroy(); finish(0); });
+    req.on('error', () => finish(0));
+    req.end();
+  });
+}
+
 async function handleSniff2(req, res, u) {
   let target = parseProxyTarget(req, u);
   /* base64url 参数:?b=<base64url> 传目标 URL(避开 %2F 被浏览器丢弃) */
@@ -660,7 +711,8 @@ async function handleSniff2(req, res, u) {
       res.end(JSON.stringify(obj));
     };
     if (ctype.includes('mpegurl') || ctype.includes('video/mp4') || ctype.includes('x-mpegurl')) {
-      return send({ ok: true, direct: true, urls: [finalUrl] });
+      const dh = /\.m3u8(\?|$)/i.test(finalUrl) ? await probeResolution(finalUrl, ref) : 0;
+      return send({ ok: true, direct: true, urls: [finalUrl], quality: [dh], page: finalUrl });
     }
     const cands = collectMediaCandidates(body, finalUrl);
     const ok = [];
@@ -669,7 +721,18 @@ async function handleSniff2(req, res, u) {
       if (await probeMedia(c, ref)) ok.push(c);
     }
     if (!ok.length) return send({ ok: false, error: 'no media url found' });
-    return send({ ok: true, urls: ok, page: finalUrl });
+    /* 分辨率感知排序:1080P 优先,其次 4K/蓝光,最后未知 */
+    const scored = await Promise.all(ok.map(async (c) => ({
+      url: c,
+      h: /\.m3u8(\?|$)/i.test(c) ? await probeResolution(c, ref) : 0
+    })));
+    scored.sort((a, b) => (b.h || 0) - (a.h || 0));
+    return send({
+      ok: true,
+      urls: scored.map((s) => s.url),
+      page: finalUrl,
+      quality: scored.map((s) => s.h || 0)
+    });
   } catch (e) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));

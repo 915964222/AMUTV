@@ -1366,7 +1366,7 @@ const App = (() => {
       <div class="title">${hlName(m.it.name, wd)}</div>
       <div class="sub-row">${m.srcName ? `<span class="fast">● ${escHtml(m.srcName)} ${m.bestMs}ms</span>` : ''}<span class="frm">${escHtml(m.frm || '')}</span></div>
     </div>`);
-    c.onclick = () => goDetail(m.it);
+    c.onclick = () => goDetail(m.it, m.srcId);
     return c;
   }
 
@@ -1551,10 +1551,10 @@ const App = (() => {
       groups.filter(g => !g.error).forEach(g => {
         (g.list || []).forEach(it => {
           if (!it || !it.name) return;
-          const m = byName.get(it.name) || { it, count: 0, bestMs: g.ms, srcName: g.srcName, frm: typeName(it), q: 0 };
+          const m = byName.get(it.name) || { it, count: 0, bestMs: g.ms, srcId: g.srcId, srcName: g.srcName, frm: typeName(it), q: 0 };
           m.count++;
           const q = API.qualityRank(it.remarks);
-          if (q > m.q) { m.q = q; m.it = it; }
+          if (q > m.q) { m.q = q; m.it = it; m.srcId = g.srcId; }
           if (g.ms < m.bestMs) { m.bestMs = g.ms; m.srcName = g.srcName; }
           if (!m.frm || m.frm === '其他') m.frm = typeName(it);
           byName.set(it.name, m);
@@ -2227,7 +2227,7 @@ const App = (() => {
             <div class="set-row"><div class="set-txt"><b>全网搜索并发数</b><span>同时请求的源数量(1-12)</span></div><input type="number" id="cfg-pool" data-f tabindex="-1" min="1" max="12" value="${cfg.multiSearch}"></div>
             <div class="set-row"><div class="set-txt"><b>自动跳过片头</b><span>播放时默认跳过;按影片精确标记在播放器⚙里</span></div><input type="checkbox" class="sw" id="cfg-skipintro" data-f tabindex="-1" ${cfg.skipIntroAuto ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>默认片头时长</b><span>秒(0-600)</span></div><input type="number" id="cfg-intro" data-f tabindex="-1" min="0" max="600" value="${cfg.defaultIntroSec}"></div>
-            <div class="set-row"><div class="set-txt"><b>M3U8 广告过滤</b><span>自动剔除贴片/插入广告切片</span></div><input type="checkbox" class="sw" id="cfg-adfilter" data-f tabindex="-1" ${cfg.adFilter !== false ? 'checked' : ''}></div>
+            <div class="set-row"><div class="set-txt"><b>M3U8 广告过滤</b><span>自动剔除贴片/插入广告切片 · ${(window.AdFilter && window.AdFilter.RULES) ? window.AdFilter.RULES.length : 0} 条关键词规则 + CUE/DISCONTINUITY + 结构检测(少数派目录)</span></div><input type="checkbox" class="sw" id="cfg-adfilter" data-f tabindex="-1" ${cfg.adFilter !== false ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>智能嗅探直连</b><span>捕获网页直链后自动择优播放</span></div><input type="checkbox" class="sw" id="cfg-sniffauto" data-f tabindex="-1" ${cfg.sniffAuto !== false ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>遥控输入自动弹键盘</b><span>方向键移到输入框时自动弹出屏幕键盘(方向键选字、Enter 输入、Esc 收起)</span></div><input type="checkbox" class="sw" id="cfg-osk" data-f tabindex="-1" ${cfg.autoKeyboard !== false ? 'checked' : ''}></div>
             <div class="set-row"><div class="set-txt"><b>网盘海报墙刮削</b><span>豆瓣:评分/海报/简介/演员表</span></div><input type="checkbox" class="sw" id="cfg-scrape" data-f tabindex="-1" ${cfg.scrapeOn !== false ? 'checked' : ''}></div>
@@ -2242,7 +2242,7 @@ const App = (() => {
             <button class="btn primary" id="repo-add" data-f tabindex="-1">订阅</button>
           </div>
           <div class="form" style="margin-top:8px">
-            <button class="btn primary" id="preset-1080" data-f tabindex="-1">📥 一键导入 1080P 精选采集源(8个实测可用)</button>
+            <button class="btn primary" id="preset-1080" data-f tabindex="-1">🔄 恢复 1080P 预设源(4个独立后端,已 SPS 实测真 1080P)</button>
             <button class="btn" id="preset-repo-xhz" data-f tabindex="-1">🗂️ 订阅多仓:小盒子</button>
           </div>
           <div class="form" style="margin-top:10px">
@@ -2333,7 +2333,7 @@ const App = (() => {
       const origin = s.originId ? DB.getRepos().find(r => r.id === s.originId) : null;
       const item = UI.el(`<div class="src-item${cur && cur.id === s.id ? ' active-src' : ''}">
         <span class="src-status${cur && cur.id === s.id ? ' on' : ''}" data-role="status"></span>
-        <span class="s-name">${s.name}${origin ? ` <span style="color:var(--muted);font-size:11px">[仓:${origin.name}]</span>` : ''}<br><span class="s-api">${s.api || '(内置)'}</span><span class="test-result" data-role="test" style="font-size:11.5px"></span></span>
+        <span class="s-name">${s.name}${s.builtIn ? ' <span style="color:var(--muted);font-size:11px">[内置]</span>' : (s.tag === '1080P' ? ' <span style="color:var(--muted);font-size:11px">[1080P·已实测]</span>' : '')}${origin ? ` <span style="color:var(--muted);font-size:11px">[仓:${origin.name}]</span>` : ''}<br><span class="s-api">${s.api || '(内置)'}</span><span class="test-result" data-role="test" style="font-size:11.5px"></span></span>
         <button class="mini-btn" data-op="test" data-f tabindex="-1">测试</button>
         <button class="mini-btn" data-op="use" data-f tabindex="-1">使用</button>
         ${s.builtIn ? '' : '<button class="mini-btn danger" data-op="del" data-f tabindex="-1">删除</button>'}
@@ -2482,21 +2482,20 @@ const App = (() => {
   }
 
   function bindSettingsActions(cfg) {
-    /* 1080P 精选采集源(2026-10-26 实测连通+逐源拉 m3u8 查广告后精选);
-       已剔除实测混插广告片段的源:量子(/20261003 外路广告x7)、暴风(/video/adjump/ x9)、360(外源广告x8)、极速(接口超时且返回播放器页无法验证)。
-       保留 4 源正片单一 host+单一 path,无广告片段;配合「默认画质优先1080P」设置食用 */
-    const PRESET_1080 = [
-      { name: '非凡资源(1080P)', api: 'https://api.ffzyapi.com/api.php/provide/vod/' },
-      { name: '红牛资源(1080P)', api: 'https://hongniuzy2.com/api.php/provide/vod/' },
-      { name: '豪华资源(1080P)', api: 'https://hhzyapi.com/api.php/provide/vod/' },
-      { name: '电影天堂(1080P)', api: 'http://caiji.dyttzyapi.com/api.php/provide/vod/' },
-    ];
+    /* 源策略(2026-10-27 调整):
+       **只有爱奇艺资源是内置源**(builtIn:true,列表里不给删除按钮,老安装自动补齐);
+       4 个 1080P 源只做「保留」——首次启动自带、可删可换,删了记 tvw_preset1080_removed 不再自动加回。
+       本按钮只负责「恢复」被删掉的 1080P 预设源。
+       实测依据(2026-10-27,接口连通 + 拉到 m3u8 + 解析 H.264 SPS):
+         非凡资源 1920x1088 / 电影天堂 1920x1088 / 天涯 1920x1080 / 豪华资源 1080P(播放实测)
+       已剔除:暴风(正片混插 adjump 广告切片)、红牛(20~75s 超时)、旺旺/卧龙/速播(超时或非标准返回)、
+              优质(502)、闪电(486 高)、lzi(标 1080x608 实测 916x466=伪 1080)。
+       注意:非凡的 from/hash、from/other 是同一后端镜像,不算独立源,已弃用。 */
     view().querySelector('#preset-1080').onclick = () => {
-      let added = 0, dup = 0;
-      PRESET_1080.forEach(p => { const r = DB.addSource(p.name, p.api, { originName: '1080P精选' }); r.ok ? added++ : dup++; });
+      const r = DB.restorePreset1080();
       renderTabs();
       if (document.querySelector('.settings')) pageSet();
-      toast(`1080P 精选源导入完成:新增 ${added} 个` + (dup ? `,已存在 ${dup} 个` : ''));
+      toast(r.added ? `已恢复 1080P 预设源:新增 ${r.added} 个` : '1080P 预设源已全部就绪');
     };
     view().querySelector('#preset-repo-xhz').onclick = () => importRepoSites('http://xhztv.top/dc/', '小盒子多仓', null, false);
 
@@ -2737,8 +2736,9 @@ const App = (() => {
   }
 
   /* ============ 详情页 ============ */
-  async function goDetail(item) {
-    const src = DB.getCurrentSource();
+  async function goDetail(item, srcId) {
+    /* 聚合搜索结果可能来自非当前源:按卡片的来源源查详情,否则用当前源 */
+    const src = (srcId ? DB.getSources().find(s => s.id === srcId) : null) || DB.getCurrentSource();
     if (subPage !== 'detail') subFrom = tab;
     subPage = 'detail';
     view().innerHTML = `<div class="detail"><div class="backdrop" style="background-image:url('${item.pic}')"></div>${UI.spinner()}</div>`;
