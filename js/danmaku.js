@@ -109,16 +109,24 @@
     };
   }
 
-  /* 在线弹幕:POST /dm/fetch(自定义模板或弹弹play官方凭证) → B站XML 解析 */
-  async function fetchOnline(fileName) {
+  /* 在线弹幕:POST /dm/fetch
+   * 服务端按「自定义模板 → 弹弹play(填了凭证) → B站内置(免配置)」顺序自动选源。
+   * opts 带 name/ep/duration:片名与集数用来搜,B 站用实际片长校正到具体某一集 */
+  async function fetchOnline(fileName, opts) {
     const cfg = (typeof DB !== 'undefined' && DB.getConfig()) || {};
+    const o = opts || {};
     const SRV = location.protocol === 'file:' ? 'http://127.0.0.1:9978' : '';
     const r = await fetch(SRV + '/dm/fetch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: fileName, tpl: cfg.dmTpl || '', appId: cfg.dmAppId || '', appSecret: cfg.dmAppSecret || '' }),
+      body: JSON.stringify({
+        fileName: fileName || '', name: o.name || '', ep: o.ep || '',
+        duration: Math.round(o.duration || 0),
+        tpl: cfg.dmTpl || '', gy: cfg.dmGy || '',
+        appId: cfg.dmAppId || '', appSecret: cfg.dmAppSecret || '',
+      }),
     }).then(x => x.json());
     if (r.error) throw new Error(r.error);
-    return { items: parseXML(r.xml), matched: r.matched || '' };
+    return { items: parseXML(r.xml), matched: r.matched || '', from: r.from || '', count: r.count || 0 };
   }
 
   window.Danmaku = { parseXML: parseXML, createRenderer: createRenderer, fetchOnline: fetchOnline, state: state };

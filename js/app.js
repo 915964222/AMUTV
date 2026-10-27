@@ -32,6 +32,7 @@ const App = (() => {
   let homeCache = new Map();   // srcId -> {classes, latest}
   let catCache = new Map();    // srcId|tid|pg -> data
   let searchSeq = 0;
+  let lastBackAt = 0;          // 首页「再按一次退出」的上次按键时间
 
   /* 分类多重筛选器:当前分类已加载的全部条目(用于客户端按 类型/地区/年份 复合筛选) */
   let catAll = [];                                   // 已加载条目累加(去重)
@@ -2283,15 +2284,19 @@ const App = (() => {
           <div class="hint">登录后在「网盘」页选择对应云盘即可浏览/播放,4K 与蓝光 Remux 原画直连(直链经本机中转,支持拖动)。</div>
         </section>
         <section class="sec-card">
-          <div class="sec-head"><span class="sec-ico">${I_SET.dm}</span>弹幕接口<span class="sec-tag">弹弹play / 自建</span></div>
+          <div class="sec-head"><span class="sec-ico">${I_SET.dm}</span>弹幕接口<span class="sec-tag">公益 / B站内置 / 弹弹play / 自建</span></div>
+          <div class="set-row"><div class="set-txt"><b>开片自动获取弹幕</b><span>按「片名 + 第几集 + 实际片长」匹配;B站找不到这一集就留空,不拿别的集凑数。国内剧集想更准可填下方弹弹play 凭证</span></div><input type="checkbox" class="sw" id="cfg-dmauto" data-f tabindex="-1" ${cfg.dmAuto !== false ? 'checked' : ''}></div>
           <div class="form">
-            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName} 占位,返回B站XML或dandanplay JSON;留空=用官方)">
+            <input id="dm-tpl" data-f tabindex="-1" placeholder="自定义弹幕接口模板(含 {fileName} 占位,返回B站XML或dandanplay JSON;留空=不启用)">
+            <input id="dm-gy" data-f tabindex="-1" placeholder="公益弹幕接口(弹弹play兼容代理;留空=内置公益源,填 off=禁用)" style="flex:1 1 60%">
             <input id="dm-appid" data-f tabindex="-1" placeholder="弹弹play AppId(官方接口需要,dev.dandanplay.com 申请)" style="flex:1 1 45%">
             <input id="dm-secret" data-f tabindex="-1" type="password" placeholder="弹弹play AppSecret" style="flex:1 1 45%">
             <button class="btn primary" id="dm-save" data-f tabindex="-1">保存弹幕配置</button>
           </div>
-          <div class="hint">默认接口:弹弹play 官方(2025 起匿名访问已关闭,需填入自己申请的 AppId/AppSecret)。
-          自定义接口:填一个含 <b>{fileName}</b> 占位的 URL,播放器点「在线弹幕」时用当前文件名请求;返回 B站弹幕 XML 或 dandanplay JSON 均可自动识别。</div>
+          <div class="hint">选源顺序:自定义模板 → 弹弹play(填了凭证) → <b>公益接口</b>(免配置,弹弹play兼容,搜片名→选集→拉弹幕,动画/番剧最全) → B站内置。
+          公益接口留空用内置源;自建 danmu_api(弹弹play兼容)可填地址;填 <b>off</b> 禁用。
+          国产剧、院线片建议填 <b>弹弹play</b> 的 AppId/AppSecret(dev.dandanplay.com 免费申请,匹配按文件名最准)。
+          自定义接口:含 <b>{fileName}</b> 占位的 URL,返回 B站 XML 或 dandanplay JSON 均可自动识别。</div>
         </section>
         <section class="sec-card span-2">
           <div class="sec-head"><span class="sec-ico">${I_SET.tv}</span>网络与蓝牙<span class="sec-tag" id="sys-tag">检测中…</span></div>
@@ -2848,11 +2853,17 @@ const App = (() => {
     if (dmTpl) {
       const c = DB.getConfig();
       dmTpl.value = c.dmTpl || '';
+      view().querySelector('#dm-gy').value = c.dmGy || '';
       view().querySelector('#dm-appid').value = c.dmAppId || '';
       view().querySelector('#dm-secret').value = c.dmAppSecret || '';
+      view().querySelector('#cfg-dmauto').onchange = e => {
+        DB.setConfig({ dmAuto: e.target.checked });
+        toast(e.target.checked ? '已开启:开片自动获取弹幕' : '已关闭开片自动获取(仍可在播放器弹幕页手动匹配)');
+      };
       view().querySelector('#dm-save').onclick = () => {
         DB.setConfig({
           dmTpl: dmTpl.value.trim(),
+          dmGy: view().querySelector('#dm-gy').value.trim(),
           dmAppId: view().querySelector('#dm-appid').value.trim(),
           dmAppSecret: view().querySelector('#dm-secret').value.trim(),
         });
@@ -2866,7 +2877,7 @@ const App = (() => {
       if (!box) return;
       box.innerHTML = '';
       Cloud.list().forEach((c, i) => {
-        const b = UI.el(`<button class="cat active" data-f tabindex="-1">${c.name}</button>`);
+        const b = UI.el(`<button class="cat active" data-f tabindex="-1">${c.name} · 已登录 ✕</button>`);
         b.onclick = () => {
           const arr = Cloud.list(); arr.splice(i, 1); Cloud.save(arr);
           toast('已退出 ' + c.name); renderCloudAccts();
@@ -3223,10 +3234,13 @@ const App = (() => {
     }
   }
 
-  /* 历史记录续播 */
+  /* 历史记录续播
+   * 注意:这里**不能**先把 #view 清空成 spinner。播放器是盖在上面的独立层,
+   * 用户按返回关掉播放器时会露出底下这层,一清空就成了「永久转圈的白页」。
+   * 保持原页面不动,失败时也只是弹个提示,人还在原来的列表里。 */
   async function resumeHist(h) {
     const src = DB.getSources().find(s => s.id === h.sourceId) || DB.getCurrentSource();
-    view().innerHTML = UI.spinner();
+    toast('正在打开「' + (h.name || '上次观看') + '」…');
     try {
       const d = await API.detailOf(src, h.vodId);
       if (!d) throw new Error('详情不存在,源可能已失效');
@@ -3235,7 +3249,6 @@ const App = (() => {
       playVod(src, d, groups, (h.groupIndex != null ? h.groupIndex : 'prefer'), h.position || 0, h.epIndex || 0);
     } catch (e) {
       toastErr(e.message || e);
-      pageHome();
     }
   }
 
@@ -3246,10 +3259,28 @@ const App = (() => {
   }
 
   /* ============ 全局按键:返回 ============ */
+  /* 关闭覆盖层后的兜底:如果底下这层页面是空的、或只剩一个转圈,就按当前 tab 重画一次。
+   * 踩过的坑:历史「续播」会把 #view 清成 spinner 再盖播放器,按返回关掉播放器后
+   * 底下一片空白永远转圈,看着像「返回把 App 弄坏了」。 */
+  function ensurePage() {
+    const v = view();
+    if (!v) return false;
+    const kids = v.children;
+    const onlySpin = kids.length === 1 && /(^|\s)spinner(\s|$)/.test(kids[0].className || '');
+    if (kids.length > 0 && !onlySpin) return false;
+    const t = tab || 'home';
+    if (t === 'home') pageHome(); else go(t);
+    return true;
+  }
+
   /* 返回上一级:软键盘 → 播放器 → 弹窗 → 二级页(详情/分类)→ 首页 */
   function goBack() {
     if (window.OSK && OSK.isOpen()) { OSK.close(); return true; }
-    if (Player.isOpen()) { Player.close(); return true; }
+    if (Player.isOpen()) {
+      /* 播放器里的选集/换源/设置抽屉开着时,先关抽屉,不要把整场播放退掉 */
+      if (Player.back && Player.back()) return true;
+      Player.close(); ensurePage(); return true;
+    }
     const mask = document.querySelector('.modal-mask');
     if (mask) {
       const x = mask.querySelector('.modal-head .x') || mask.querySelector('.x');
@@ -3258,7 +3289,13 @@ const App = (() => {
     }
     if (subPage) { const t = subFrom || 'home'; subPage = null; go(t); return true; }
     if (tab !== 'home') { go('home'); return true; }
-    return false;
+    /* 已经在首页:第一次只提示,2 秒内再按一次才交给原生退出 ——
+     * 电视遥控器误触率高,一按就退到桌面很容易让人「莫名其妙被踢出去」 */
+    const now = Date.now();
+    if (now - lastBackAt < 2000) { lastBackAt = 0; return false; }
+    lastBackAt = now;
+    toast('再按一次「返回」退出应用');
+    return true;
   }
   /* 安卓遥控器的「返回」键由 MainActivity 调这里:返回 1=网页已处理,0=可以退出应用 */
   window.__onBack = function () { try { return goBack() ? 1 : 0; } catch (e) { return 0; } };

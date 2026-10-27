@@ -832,69 +832,275 @@ async function handleRc(req, res, u) {
 }
 
 /* ================= 弹幕接口代理 =================
- * 内置默认:弹弹play 官方 API(2025 起需 AppId/AppSecret 签名,可在设置里申请填入)。
- * 自定义:{fileName} 占位模板,GET 返回 B站XML 或 dandanplay comment JSON。
+ * 三条来源,按优先级自动选(设置里留空即用内置):
+ *   1) 自定义模板 tpl:{fileName} 占位,GET 回 B站 XML 或 dandanplay JSON
+ *   2) 弹弹play 官方:填了 AppId/AppSecret 才走,按时长+集数匹配最准
+ *   3) B站内置(免凭证):搜「片名 + 集数」→ bvid → cid → 弹幕 XML,
+ *      拿到实际片长时按片长校正,避免抓成合集/解说视频的弹幕
+ * 返回 { xml, from, matched, count };拿不到时 { error }
  */
 const DM_DEFAULT = { base: 'https://api.dandanplay.net' };
+
+/* ---- B站:免凭证取弹幕 ----
+ * 2026-10 实测:search/type 不带 wbi 签名直接 412 风控;带 buvid3 + w_rid 就正常。
+ * nav 未登录(code -101)一样会回 wbi_img,所以不需要任何账号或 AppId。 */
+const BILI_TAB = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52];
+const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+let biliSess = { cookie: '', mixin: '', at: 0 };
+
+async function biliHttp(url, extra) {
+  const hdr = Object.assign({ 'User-Agent': BILI_UA, 'Referer': 'https://www.bilibili.com/' }, extra || {});
+  if (biliSess.cookie) hdr.Cookie = biliSess.cookie;
+  const r = await fetch(url, { headers: hdr });
+  const text = await r.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (e) {}
+  return { status: r.status, json: json, text: text };
+}
+
+async function biliPrep(force) {
+  if (!force && biliSess.mixin && Date.now() - biliSess.at < 30 * 60 * 1000) return;
+  const spi = await biliHttp('https://api.bilibili.com/x/frontend/finger/spi');
+  const b3 = spi.json && spi.json.data && spi.json.data.b_3;
+  if (b3) biliSess.cookie = 'buvid3=' + b3 + '; b_nut=' + Math.floor(Date.now() / 1000);
+  const nav = await biliHttp('https://api.bilibili.com/x/web-interface/nav');
+  const img = nav.json && nav.json.data && nav.json.data.wbi_img;
+  if (!img) throw new Error('B站 wbi 密钥获取失败(HTTP ' + nav.status + ')');
+  const pick = u => String(u).split('/').pop().split('.')[0];
+  const raw = pick(img.img_url) + pick(img.sub_url);
+  biliSess.mixin = BILI_TAB.map(i => raw[i]).join('').slice(0, 32);
+  biliSess.at = Date.now();
+}
+
+function biliSigned(params) {
+  const p = Object.assign({}, params, { wts: Math.floor(Date.now() / 1000) });
+  const q = Object.keys(p).sort()
+    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(String(p[k]).replace(/[!'()*]/g, '')))
+    .join('&');
+  return q + '&w_rid=' + require('crypto').createHash('md5').update(q + biliSess.mixin).digest('hex');
+}
+
+/* 搜索。412 = 风控,换一次指纹重试 */
+async function biliSearch(kw, retried) {
+  const r = await biliHttp('https://api.bilibili.com/x/web-interface/wbi/search/type?' + biliSigned({ search_type: 'video', keyword: kw, page: 1 }));
+  const blocked = r.status === 412 || (r.json && (r.json.code === -412 || r.json.code === -403));
+  if (blocked && !retried) { await biliPrep(true); return biliSearch(kw, true); }
+  if (!r.json || !r.json.data || !Array.isArray(r.json.data.result)) return [];
+  return r.json.data.result;
+}
+
+function biliDurSec(d) {
+  const a = String(d || '').split(':').map(Number);
+  if (!a.length || a.some(x => !isFinite(x))) return 0;
+  if (a.length === 3) return a[0] * 3600 + a[1] * 60 + a[2];
+  if (a.length === 2) return a[0] * 60 + a[1];
+  return a[0] || 0;
+}
+
+/* 中文数字 → 整数(只处理「第 X 集」这种小数字:十/十一/二十三/一百零五) */
+function cnNum(str) {
+  const d = { '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+  let n = 0, cur = 0;
+  for (const ch of String(str)) {
+    if (ch in d) cur = d[ch];
+    else if (ch === '十') { n += (cur || 1) * 10; cur = 0; }
+    else if (ch === '百') { n += (cur || 1) * 100; cur = 0; }
+    else return 0;
+  }
+  return n + cur;
+}
+
+/* 从标题/分P名里取集数:支持「第05集」「第十集」「第 12 话」 */
+function epNoOf(text) {
+  const t = String(text || '');
+  const m1 = t.match(/第\s*0*(\d+)\s*[集话話期]/);
+  if (m1) return Number(m1[1]);
+  const m2 = t.match(/第\s*([零一二三四五六七八九十百]{1,5})\s*[集话話期]/);
+  if (m2) return cnNum(m2[1]);
+  return 0;
+}
+
+/* 明显不是正片的(解说/合集/音乐/预告):单集候选里直接排除 */
+const DM_DENY = /(解说|解析|影评|盘点|混剪|花絮|预告|片花|OST|主题曲|歌曲|音乐|有声|小说|合集|完整版)/i;
+
+/* 片长是否接近 */
+function durClose(a, b, tol) {
+  if (!a || !b) return false;
+  return Math.abs(a - b) / Math.max(a, b) <= (tol || 0.35);
+}
+
+/* 从候选里挑出「到底哪一集」:
+ * - 合集(分P):一集一个 P,优先按集数取 P,其次按时长挑 P
+ * - 单集上传:标题里写明了别的集数就直接跳过,再按时长收敛
+ * 这一步必须看 view 的 pages,只看搜索结果时长会被「整部合集」骗到 */
+async function biliPickEpisode(cands, targetDur, epNo) {
+  let best = null;
+  for (let i = 0; i < cands.length && i < 6; i++) {
+    const it = cands[i];
+    const title = String(it.title || '').replace(/<[^>]+>/g, '');
+    const titleEp = epNoOf(title);
+    let v;
+    try { v = await biliHttp('https://api.bilibili.com/x/web-interface/view?bvid=' + it.bvid); } catch (e) { continue; }
+    const data = v.json && v.json.data;
+    if (!data || !data.cid) continue;
+    const pages = data.pages || [];
+    let page = null, sc = 0;
+    if (pages.length > 1) {
+      /* 分P合集:一集一个 P。先认 P 名里的集数,再按片长挑 */
+      let p = null;
+      if (epNo > 0) {
+        for (let k = 0; k < pages.length; k++) { if (epNoOf(pages[k].part) === epNo) { p = pages[k]; break; } }
+        if (!p && pages[epNo - 1]) p = pages[epNo - 1];
+      }
+      if (!p && targetDur > 0) {
+        let bd = -1;
+        for (let k = 0; k < pages.length; k++) {
+          const diff = Math.abs(pages[k].duration - targetDur);
+          if (bd < 0 || diff < bd) { bd = diff; p = pages[k]; }
+        }
+      }
+      if (!p) continue;
+      if (targetDur > 0 && !durClose(p.duration, targetDur, 0.15)) continue;
+      page = p;
+      sc = 2 + (targetDur > 0 ? (1 - Math.abs(p.duration - targetDur) / targetDur) : 0.5);
+      if (epNo > 0 && epNoOf(p.part) === epNo) sc += 1;
+    } else {
+      /* 单集上传:标题必须写明集数、且跟当前集一致;时长 15% 内;排除解说/合集类 */
+      if (epNo > 0 && titleEp !== epNo) continue;
+      if (DM_DENY.test(title)) continue;
+      if (targetDur > 0 && !durClose(data.duration, targetDur, 0.15)) continue;
+      page = { cid: data.cid, page: 1, part: '' };
+      sc = 2 + (targetDur > 0 ? (1 - Math.abs(data.duration - targetDur) / targetDur) : 0.3) + (epNo > 0 && titleEp === epNo ? 1.2 : 0);
+    }
+    if (!best || sc > best.sc) best = { sc: sc, it: it, page: page, title: title, dur: page.duration || data.duration || 0 };
+  }
+  return best;
+}
+
+async function biliFetch(name, ep, duration) {
+  await biliPrep();
+  const epNo = epNoOf(ep);
+  const kws = [];
+  if (ep && /第\s*\d+\s*[集话話期]/.test(ep)) kws.push((name + ' ' + ep).trim());
+  if (epNo) kws.push(name + ' 第' + epNo + '集');
+  kws.push(name);
+  /* 每个关键词都搜一遍,凑够候选再统一排序(单关键词经常只回合集/解说) */
+  const cands = [], seen = {};
+  for (let i = 0; i < kws.length; i++) {
+    const kw = kws[i];
+    if (!kw) continue;
+    const list = await biliSearch(kw, false);
+    for (let k = 0; k < list.length; k++) {
+      const it = list[k] || {};
+      if (!it.bvid || seen[it.bvid]) continue;
+      seen[it.bvid] = 1;
+      cands.push(it);
+    }
+    if (cands.length >= 12) break;
+  }
+  if (!cands.length) return null;
+  /* 排序:标题带本集集数 > 时长接近 > 播放量 */
+  const epRe = epNo > 0 ? new RegExp('第\\s*(0*' + epNo + '|[零一二三四五六七八九十百]+)\\s*[集话話期]') : null;
+  cands.sort(function (a, b) {
+    const ta = epRe && epRe.test(String(a.title || '')) ? 1 : 0;
+    const tb = epRe && epRe.test(String(b.title || '')) ? 1 : 0;
+    if (tb !== ta) return tb - ta;
+    if (duration > 0) {
+      const fa = Math.abs(biliDurSec(a.duration) - duration) / duration;
+      const fb = Math.abs(biliDurSec(b.duration) - duration) / duration;
+      if (Math.abs(fa - fb) > 0.2) return fa - fb;
+    }
+    return Number(b.play || 0) - Number(a.play || 0);
+  });
+  const best = await biliPickEpisode(cands, duration, epNo);
+  if (!best) return null;
+  const dmRes = await fetch('https://api.bilibili.com/x/v1/dm/list.so?oid=' + best.page.cid, {
+    headers: { 'User-Agent': BILI_UA, 'Referer': 'https://www.bilibili.com/', 'Cookie': biliSess.cookie },
+  });
+  /* fetch 会自动解掉 content-encoding: deflate,直接拿到的就是 XML */
+  const xml = Buffer.from(await dmRes.arrayBuffer()).toString('utf8');
+  const count = (xml.match(/<d p=/g) || []).length;
+  if (!count) return null;
+  const tag = best.page.page > 1 ? (' · P' + best.page.page) : '';
+  const mins = Math.round((best.page.duration || 0) / 60);
+  return { xml: xml, matched: best.title.slice(0, 36) + tag + (mins ? ' · ' + mins + '分' : ''), count: count };
+}
+
+/* ---- 弹弹play 官方(需 AppId/AppSecret) ---- */
+async function dandanFetch(fileName, body) {
+  const base = String(body.base || DM_DEFAULT.base).replace(/\/+$/, '');
+  const ts = Math.floor(Date.now() / 1000) + '';
+  const crypto = require('crypto');
+  const sig = p2 => crypto.createHmac('sha256', body.appSecret).update(body.appId + ts + p2).digest('base64');
+  const hdr = p2 => ({
+    'Content-Type': 'application/json', 'User-Agent': BILI_UA,
+    'X-AppId': body.appId, 'X-Timestamp': ts, 'X-Signature': sig(p2),
+  });
+  const mp = '/api/v2/match';
+  const m = await fetch(base + mp, { method: 'POST', headers: hdr(mp),
+    body: JSON.stringify({ fileName: fileName, fileHash: '', fileSize: 0, videoDuration: 0, matchMode: 1 }) });
+  const mj = await m.json().catch(() => null);
+  if (!m.ok || !mj || !mj.isMatched || !(mj.matches || []).length) throw new Error('弹弹play 未匹配到剧集(' + m.status + ')');
+  const ep = mj.matches[0];
+  const cp = '/api/v2/comment/' + ep.episodeId + '?withRelated=true&chConvert=1';
+  const c = await fetch(base + cp, { headers: hdr(cp) });
+  const cj = await c.json().catch(() => null);
+  if (!c.ok || !cj || !Array.isArray(cj.comments)) throw new Error('弹弹play 弹幕拉取失败(' + c.status + ')');
+  const xml = '<?xml version="1.0"?><i>' + cj.comments.map(x =>
+    '<d p="' + (x.shift || 0) + ',1,25,16777215,' + Math.floor((x.shift || 0) * 1000) + ',0,0,0">' +
+    String(x.p || x.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</d>').join('') + '</i>';
+  return { xml: xml.slice(0, 3e6), matched: ep.episodeTitle || '', count: cj.comments.length };
+}
 
 async function handleDm(req, res, u) {
   try {
     if (u.pathname !== '/dm/fetch' || req.method !== 'POST') return jout(res, 404, { error: 'unknown dm route' });
     const body = JSON.parse(await readPostBody(req) || '{}');
     const fileName = String(body.fileName || '').slice(0, 200);
-    if (!fileName) return jout(res, 200, { error: '缺少文件名' });
+    const name = String(body.name || '').trim().slice(0, 80);
+    const ep = String(body.ep || '').trim().slice(0, 60);
+    const duration = Math.max(0, Number(body.duration) || 0);
+    if (!fileName && !name) return jout(res, 200, { error: '缺少片名' });
 
-    /* 模式一:自定义模板接口({fileName} 占位 → B站 XML / dandanplay JSON) */
+    /* 1) 自定义模板接口({fileName} 占位 → B站 XML / dandanplay JSON) */
     if (body.tpl && /^https?:\/\//.test(body.tpl)) {
-      const url = body.tpl.replace(/\{fileName\}|\{filename\}/g, encodeURIComponent(fileName));
-      const r = await fetch(url, { headers: { 'User-Agent': UA_PC, 'Accept': '*/*' } });
-      const text = await r.text();
+      const url = body.tpl.replace(/\{fileName\}|\{filename\}/g, encodeURIComponent(fileName || name));
+      const r = await fetch(url, { headers: { 'User-Agent': BILI_UA, 'Accept': '*/*' } });
+      let xml = await r.text();
       if (!r.ok) return jout(res, 502, { error: '接口返回 ' + r.status });
-      /* dandanplay comment JSON → 转 B站风格 XML */
-      let xml = text;
+      let count = 0;
       try {
-        const j = JSON.parse(text);
+        const j = JSON.parse(xml);
         if (j && Array.isArray(j.comments)) {
+          count = j.comments.length;
           xml = '<?xml version="1.0"?><i>' + j.comments.map(c =>
             '<d p="' + (c.shift || c.time || 0) + ',1,25,16777215,' + Math.floor((c.shift || 0) * 1000) + ',0,0,0">' +
             String(c.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</d>').join('') + '</i>';
         }
       } catch (e) {}
-      return jout(res, 200, { xml: xml.slice(0, 3e6) });
+      if (!count) count = (xml.match(/<d p=/g) || []).length;
+      return jout(res, 200, { xml: xml.slice(0, 3e6), from: 'tpl', count: count });
     }
 
-    /* 模式二:弹弹play 官方(需凭证) */
-    if (!body.appId || !body.appSecret) {
-      return jout(res, 200, { error: '弹弹play 官方接口 2025 起需要 AppId/AppSecret(设置→弹幕接口里填入;或改用自定义接口模板)' });
+    /* 2) 弹弹play 官方(填了凭证才走) */
+    if (body.appId && body.appSecret) {
+      try {
+        const r = await dandanFetch(fileName || (name + ' ' + ep).trim(), body);
+        return jout(res, 200, Object.assign({ from: 'dandanplay' }, r));
+      } catch (e) {
+        /* 凭证失效/未匹配 → 继续走内置,不直接把错误甩给用户 */
+        body._dandanErr = e.message;
+      }
     }
-    const base = (body.base || DM_DEFAULT.base).replace(/\/+$/, '');
-    const ts = Math.floor(Date.now() / 1000) + '';
-    const crypto = require('crypto');
-    const sig = p2 => crypto.createHmac('sha256', body.appSecret).update(body.appId + ts + p2).digest('base64');
-    const hdr = p2 => ({
-      'Content-Type': 'application/json', 'User-Agent': UA_PC,
-      'X-AppId': body.appId, 'X-Timestamp': ts, 'X-Signature': sig(p2),
-    });
-    /* 1) match:文件名匹配剧集 */
-    const mp = '/api/v2/match';
-    const m = await fetch(base + mp, { method: 'POST', headers: hdr(mp),
-      body: JSON.stringify({ fileName, fileHash: '', fileSize: 0, videoDuration: 0, matchMode: 1 }) });
-    const mj = await m.json().catch(() => null);
-    if (!m.ok || !mj || !mj.isMatched || !(mj.matches || []).length) {
-      return jout(res, 200, { error: '未匹配到弹幕(' + m.status + ')' });
+
+    /* 3) B站内置(免凭证) */
+    try {
+      const r = await biliFetch(name || fileName, ep, duration);
+      if (r) return jout(res, 200, { xml: r.xml, from: 'bilibili', matched: r.matched, count: r.count });
+      return jout(res, 200, { error: '没找到匹配的弹幕' + (body._dandanErr ? '(' + body._dandanErr + ')' : '(B站没有这一集的上传)') });
+    } catch (e) {
+      return jout(res, 200, { error: '弹幕获取失败:' + e.message });
     }
-    const ep = mj.matches[0];
-    /* 2) comment:拉弹幕并转 B站 XML */
-    const cp = '/api/v2/comment/' + ep.episodeId + '?withRelated=true&chConvert=1';
-    const c = await fetch(base + cp, { headers: hdr(cp) });
-    const cj = await c.json().catch(() => null);
-    if (!c.ok || !cj || !Array.isArray(cj.comments)) {
-      return jout(res, 200, { error: '弹幕拉取失败(' + c.status + ')' });
-    }
-    const xml = '<?xml version="1.0"?><i>' + cj.comments.map(x =>
-      '<d p="' + (x.shift || 0) + ',1,25,16777215,' + Math.floor((x.shift || 0) * 1000) + ',0,0,0">' +
-      String(x.p || x.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</d>').join('') + '</i>';
-    return jout(res, 200, { xml: xml.slice(0, 3e6), matched: ep.episodeTitle || '' });
   } catch (e) {
     return jout(res, 502, { error: e.message });
   }

@@ -56,11 +56,23 @@ public class MiniServer {
     }
 
     /* ---------------- HTTP 基础 ---------------- */
+    /* 按字节读一行(到 \n 为止,去 \r)。必须用字节流:BufferedReader 会预读 body 进字符缓冲,
+     * 导致后面按字节读 body 丢数据;且 clen 是字节数,用字符流读多字节字符(中文)会错位挂死 */
+    private static String readLineBytes(java.io.InputStream in) throws Exception {
+        StringBuilder b = new StringBuilder();
+        int c;
+        while ((c = in.read()) != -1) {
+            if (c == '\n') break;
+            if (c != '\r') b.append((char) c);
+        }
+        return b.toString();
+    }
+
     private static void serve(Socket sk) {
         try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(sk.getInputStream()));
-            String reqLine = in.readLine();
-            if (reqLine == null) { sk.close(); return; }
+            java.io.BufferedInputStream in = new java.io.BufferedInputStream(sk.getInputStream());
+            String reqLine = readLineBytes(in);
+            if (reqLine.isEmpty()) { sk.close(); return; }
             String[] parts = reqLine.split(" ");
             String method = parts[0];
             String pathQ = parts.length > 1 ? parts[1] : "/";
@@ -70,16 +82,23 @@ public class MiniServer {
 
             int clen = 0; String range = null;
             String line;
-            while ((line = in.readLine()) != null && line.length() > 0) {
+            while (!(line = readLineBytes(in)).isEmpty()) {
                 String low = line.toLowerCase();
                 if (low.startsWith("content-length:")) clen = Integer.parseInt(line.substring(15).trim());
                 if (low.startsWith("range:")) range = line.substring(6).trim();
             }
-            StringBuilder body = new StringBuilder();
-            for (int i = 0; i < clen; i++) body.append((char) in.read());
+            /* body 按 Content-Length 读「字节」,再统一 UTF-8 解码(之前按字符读,含中文的 POST 永久阻塞) */
+            String body = "";
+            if (clen > 0) {
+                if (clen > 8 * 1024 * 1024) clen = 8 * 1024 * 1024;
+                byte[] bb = new byte[clen];
+                int off = 0, n;
+                while (off < clen && (n = in.read(bb, off, clen - off)) > 0) off += n;
+                body = new String(bb, 0, off, "utf-8");
+            }
             try { android.util.Log.i("TVSRV", method + " " + path + (query.isEmpty() ? "" : "?" + query.substring(0, Math.min(60, query.length())))); } catch (Throwable ignored) {}
 
-            route(sk, method, path, query, body.toString(), range);
+            route(sk, method, path, query, body, range);
         } catch (Throwable t) {
             try { sk.close(); } catch (Exception ignored) {}
         }
@@ -251,10 +270,49 @@ public class MiniServer {
                     "https://drive-pc.quark.cn/1/clouddrive/file/download?pr=ucpro&fr=pc&fid=" + qp(query, "fid"),
                     "{}", null, qp(query, "c")); return;
             }
+            /* 夸克扫码:取二维码 token → 轮询 service_ticket → 换登录态(__puus 只在 Set-Cookie 里) */
+            if (path.equals("/cloud/quark/qr")) {
+                passthrough(sk, "GET",
+                    "https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=532&v=1.2",
+                    null, null, null); return;
+            }
+            if (path.equals("/cloud/quark/poll")) {
+                passthrough(sk, "GET",
+                    "https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=532&v=1.2&token=" +
+                    qp(query, "token"), null, null, null); return;
+            }
+            if (path.equals("/cloud/quark/st")) {
+                quarkTicket(sk, qp(query, "st")); return;
+            }
             if (path.equals("/cloud/dl")) {
                 String target = qp(query, "u");
                 boolean quark = "1".equals(qp(query, "h"));
                 streamOut(sk, target, range, quark); return;
+            }
+
+            /* ---- 通用录音:网页取回刚录的 WAV 再发云端 ASR(仅本机,音频不出局域网) ---- */
+            if (path.equals("/voice/wav") || path.equals("/voice/state")) {
+                if (!sk.getInetAddress().isLoopbackAddress()) {
+                    json(sk, 403, "{\"error\":\"forbidden\"}"); return;
+                }
+                if (path.equals("/voice/state")) {
+                    json(sk, 200, VoiceRec.state().toString(), true); return;
+                }
+                java.io.File wf = VoiceRec.wavFile(ctx);
+                if (!wf.exists() || wf.length() == 0) {
+                    json(sk, 404, "{\"error\":\"no audio\"}", true); return;
+                }
+                byte[] wb;
+                try {
+                    java.io.FileInputStream in = new java.io.FileInputStream(wf);
+                    wb = new byte[(int) wf.length()];
+                    int off = 0, r;
+                    while (off < wb.length && (r = in.read(wb, off, wb.length - off)) > 0) off += r;
+                    in.close();
+                } catch (Throwable t) {
+                    json(sk, 500, "{\"error\":\"read fail\"}", true); return;
+                }
+                reply(sk, 200, "audio/wav", wb, true); return;
             }
 
             /* ---- 系统能力:WiFi / 蓝牙(仅本机可调,避免局域网设备动本机网络) ---- */
@@ -359,12 +417,16 @@ public class MiniServer {
                 try {
                     org.json.JSONObject q0 = new org.json.JSONObject(body);
                     String fileName = q0.optString("fileName", "");
-                    if (fileName.isEmpty()) { json(sk, 200, "{\"error\":\"缺少文件名\"}"); return; }
+                    String name = q0.optString("name", "").trim();
+                    String ep = q0.optString("ep", "").trim();
+                    double dur = q0.optDouble("duration", 0);
+                    if (fileName.isEmpty() && name.isEmpty()) { json(sk, 200, "{\"error\":\"缺少片名\"}"); return; }
                     String tpl = q0.optString("tpl", "");
-                    String xml = null;
+                    String xml = null, from = "", dErr = "";
+                    lastDmMatch = "";
                     if (tpl.startsWith("http")) {
-                        String u = tpl.replace("{fileName}", java.net.URLEncoder.encode(fileName, "utf-8"))
-                                      .replace("{filename}", java.net.URLEncoder.encode(fileName, "utf-8"));
+                        String u = tpl.replace("{fileName}", java.net.URLEncoder.encode(fileName.isEmpty() ? name : fileName, "utf-8"))
+                                      .replace("{filename}", java.net.URLEncoder.encode(fileName.isEmpty() ? name : fileName, "utf-8"));
                         String text = httpText("GET", u, null, null);
                         xml = text;
                         try {
@@ -381,35 +443,78 @@ public class MiniServer {
                                 xml = b.append("</i>").toString();
                             }
                         } catch (Exception ignored) {}
+                        from = "tpl";
                     } else {
                         String appId = q0.optString("appId", ""), appSecret = q0.optString("appSecret", "");
-                        if (appId.isEmpty() || appSecret.isEmpty()) {
-                            json(sk, 200, "{\"error\":\"弹弹play官方接口需 AppId/AppSecret,或使用自定义接口模板\"}");
+                        if (!appId.isEmpty() && !appSecret.isEmpty()) {
+                            try {
+                                String ts = String.valueOf(System.currentTimeMillis() / 1000);
+                                String mp = "/api/v2/match";
+                                String fname = fileName.isEmpty() ? (name + " " + ep).trim() : fileName;
+                                org.json.JSONObject mm = new org.json.JSONObject(httpText("POST", "https://api.dandanplay.net" + mp,
+                                    "{\"fileName\":\"" + esc(fname) + "\",\"fileHash\":\"\",\"fileSize\":0,\"videoDuration\":0,\"matchMode\":1}",
+                                    dandanHeaders(appId, appSecret, ts, mp)));
+                                org.json.JSONArray ms = mm.optJSONArray("matches");
+                                if (mm.optBoolean("isMatched") && ms != null && ms.length() > 0) {
+                                    org.json.JSONObject m0 = ms.optJSONObject(0);
+                                    String epId = m0 == null ? "" : m0.optString("episodeId", "");
+                                    String cp = "/api/v2/comment/" + epId + "?withRelated=true&chConvert=1";
+                                    org.json.JSONObject cc = new org.json.JSONObject(httpText("GET", "https://api.dandanplay.net" + cp, null,
+                                        dandanHeaders(appId, appSecret, ts, cp)));
+                                org.json.JSONArray cs = cc.optJSONArray("comments");
+                                if (cs != null) {
+                                    StringBuilder b = new StringBuilder("<?xml version=\"1.0\"?><i>");
+                                    for (int i = 0; i < cs.length(); i++) {
+                                        org.json.JSONObject cm = cs.optJSONObject(i);
+                                        if (cm == null) continue;
+                                        /* 弹弹play JSON: p="秒,模式,颜色,用户hash", m=弹幕文本。
+                                           p 原样放进 XML 的 p 属性(时间/模式/颜色都保留),文本必须用 m ——
+                                           以前这里把 p(逗号数字串)当文本弹出来,全是乱码数字。 */
+                                        String pp = cm.optString("p", "").trim();
+                                        String mt = cm.optString("m", "").trim();
+                                        if (!pp.isEmpty() && !mt.isEmpty()) {
+                                            b.append("<d p=\"").append(esc(pp)).append("\">").append(esc(mt)).append("</d>");
+                                        }
+                                    }
+                                    xml = b.append("</i>").toString();
+                                    from = "dandanplay";
+                                    lastDmMatch = m0 == null ? "" : m0.optString("episodeTitle", "");
+                                }
+                                }
+                            } catch (Throwable t) { dErr = String.valueOf(t.getMessage()); }
+                        }
+                        /* 公益弹幕(弹弹play 兼容免凭证代理,默认启用):
+                           选源顺序 = 自定义模板 → 弹弹play官方(凭证) → 公益 → B站内置。
+                           gy: 空=内置默认地址; http开头=自定义代理; off=禁用走B站。 */
+                        if (xml == null) {
+                            String gy = q0.optString("gy", "").trim();
+                            if (!gy.equalsIgnoreCase("off")) {
+                                try {
+                                    xml = gongyiDm(name.isEmpty() ? fileName : name, ep,
+                                        gy.startsWith("http") ? gy : "");
+                                    if (xml != null) from = "gongyi";
+                                } catch (Throwable t) { dErr = "公益:" + t.getMessage(); }
+                            }
+                        }
+                        if (xml == null) {
+                            try {
+                                xml = biliDm(name.isEmpty() ? fileName : name, ep, dur);
+                                if (xml != null) from = "bilibili";
+                            } catch (Throwable t) {
+                                json(sk, 200, "{\"error\":\"弹幕获取失败:" + esc(String.valueOf(t.getMessage())) + "\"}");
+                                return;
+                            }
+                        }
+                        if (xml == null) {
+                            json(sk, 200, "{\"error\":\"没找到匹配的弹幕" + esc(dErr.isEmpty() ? "(B站没有这一集的上传)" : "(" + dErr + ")") + "\"}");
                             return;
                         }
-                        String ts = String.valueOf(System.currentTimeMillis() / 1000);
-                        String mp = "/api/v2/match";
-                        org.json.JSONObject mm = new org.json.JSONObject(httpText("POST", "https://api.dandanplay.net" + mp,
-                            "{\"fileName\":\"" + esc(fileName) + "\",\"fileHash\":\"\",\"fileSize\":0,\"videoDuration\":0,\"matchMode\":1}",
-                            dandanHeaders(appId, appSecret, ts, mp)));
-                        if (!mm.optBoolean("isMatched")) { json(sk, 200, "{\"error\":\"未匹配到弹幕\"}"); return; }
-                        String epId = mm.getJSONArray("matches").getJSONObject(0).optString("episodeId", "");
-                        String cp = "/api/v2/comment/" + epId + "?withRelated=true&chConvert=1";
-                        org.json.JSONObject cc = new org.json.JSONObject(httpText("GET", "https://api.dandanplay.net" + cp, null,
-                            dandanHeaders(appId, appSecret, ts, cp)));
-                        if (!cc.has("comments")) { json(sk, 200, "{\"error\":\"弹幕拉取失败\"}"); return; }
-                        StringBuilder b = new StringBuilder("<?xml version=\"1.0\"?><i>");
-                        org.json.JSONArray cs = cc.getJSONArray("comments");
-                        for (int i = 0; i < cs.length(); i++) {
-                            org.json.JSONObject cm = cs.getJSONObject(i);
-                            double sh = cm.optDouble("shift", 0);
-                            b.append("<d p=\"").append(sh).append(",1,25,16777215,").append((long) (sh * 1000)).append(",0,0,0\">")
-                             .append(esc(cm.optString("p", ""))).append("</d>");
-                        }
-                        xml = b.append("</i>").toString();
                     }
-                    json(sk, 200, "{\"xml\":\"" + esc(xml.substring(0, Math.min(xml.length(), 3000000))) + "\"}");
-                } catch (Throwable t) { json(sk, 502, "{\"error\":\"" + t.getMessage() + "\"}"); }
+                    String cut = xml.substring(0, Math.min(xml.length(), 3000000));
+                    int count = 0;
+                    for (int i = cut.indexOf("<d p="); i >= 0; i = cut.indexOf("<d p=", i + 1)) count++;
+                    json(sk, 200, "{\"xml\":\"" + esc(cut) + "\",\"from\":\"" + from + "\",\"matched\":\"" + esc(lastDmMatch) + "\",\"count\":" + count + "}");
+                } catch (Throwable t) { json(sk, 502, "{\"error\":\"" + esc(String.valueOf(t.getMessage())) + "\"}"); }
                 return;
             }
 
@@ -800,6 +905,87 @@ public class MiniServer {
         }
     }
 
+    /* 夸克:用 service_ticket 换登录态。
+     * __puus 只出现在响应的 Set-Cookie 里, 网页 fetch 拿不到(就算 CORS 通了也读不到 Set-Cookie),
+     * 所以必须原生走一次; 并且把沿途所有 cookie 拼起来存 —— 只存 __puus 会缺 ctoken/__pus。 */
+    private static void quarkTicket(Socket sk, String st) {
+        if (st == null || st.length() < 8) {
+            json(sk, 200, "{\"ok\":false,\"message\":\"service_ticket 为空\"}"); return;
+        }
+        java.util.LinkedHashMap<String, String> jar = new java.util.LinkedHashMap<String, String>();
+        String url = "https://pan.quark.cn/account/info?st=" + st + "&lw=scan";
+        String bodyText = "";
+        int httpCode = 0;
+        try {
+            for (int hop = 0; hop < 4; hop++) {
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setInstanceFollowRedirects(false);   // 自己跟,否则中间跳转的 Set-Cookie 全丢
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(20000);
+                c.setRequestProperty("User-Agent", UA_PC);
+                c.setRequestProperty("Referer", "https://pan.quark.cn/");
+                if (jar.size() > 0) c.setRequestProperty("Cookie", joinCookies(jar));
+                for (java.util.Map.Entry<String, java.util.List<String>> en : c.getHeaderFields().entrySet()) {
+                    if (en.getKey() == null || !"set-cookie".equalsIgnoreCase(en.getKey())) continue;
+                    if (en.getValue() == null) continue;
+                    for (String sv : en.getValue()) {
+                        int eq = sv.indexOf('=');
+                        if (eq <= 0) continue;
+                        String name = sv.substring(0, eq).trim();
+                        String val = sv.substring(eq + 1);
+                        int sc = val.indexOf(';');
+                        if (sc >= 0) val = val.substring(0, sc);
+                        if (name.length() > 0 && val.length() > 0) jar.put(name, val);
+                    }
+                }
+                httpCode = c.getResponseCode();
+                if (httpCode >= 300 && httpCode < 400) {
+                    String loc = c.getHeaderField("Location");
+                    if (loc == null || loc.length() == 0) break;
+                    url = loc.startsWith("http") ? loc
+                        : ("https://pan.quark.cn" + (loc.startsWith("/") ? "" : "/") + loc);
+                    continue;
+                }
+                InputStream is = httpCode >= 400 ? c.getErrorStream() : c.getInputStream();
+                java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+                if (is != null) {
+                    byte[] buf = new byte[4096]; int n;
+                    while ((n = is.read(buf)) != -1) b.write(buf, 0, n);
+                    is.close();
+                }
+                bodyText = new String(b.toByteArray(), "utf-8");
+                break;
+            }
+        } catch (Throwable t) {
+            json(sk, 200, "{\"ok\":false,\"message\":\"取登录态出错:" + esc(String.valueOf(t)) + "\"}");
+            return;
+        }
+        boolean ok = jar.containsKey("__puus");
+        String nick = "";
+        try {
+            JSONObject d = new JSONObject(bodyText).optJSONObject("data");
+            if (d != null) nick = d.optString("nickname", d.optString("nick_name", ""));
+        } catch (Throwable ignored) {}
+        JSONObject o = new JSONObject();
+        try {
+            o.put("ok", ok);
+            o.put("cookie", ok ? joinCookies(jar) : "");
+            o.put("nickname", nick);
+            o.put("http", httpCode);
+            if (!ok) o.put("message", bodyText.length() > 220 ? bodyText.substring(0, 220) : bodyText);
+        } catch (Throwable ignored) {}
+        json(sk, 200, o.toString(), true);
+    }
+
+    private static String joinCookies(java.util.LinkedHashMap<String, String> jar) {
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, String> e : jar.entrySet()) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(e.getKey()).append('=').append(e.getValue());
+        }
+        return sb.toString();
+    }
+
     /* 云盘直链流式输出(Range 透传) */
     private static void streamOut(Socket sk, String urlStr, String range, boolean quark) {
         try {
@@ -1037,5 +1223,357 @@ public class MiniServer {
             }
         } catch (Throwable ignored) {}
         return "127.0.0.1";
+    }
+
+    /* ================= 弹幕:B站内置(免凭证) =================
+     * 2026-10 实测:search/type 不带 wbi 签名直接 412 风控,带 buvid3 + w_rid 正常;
+     * nav 即使未登录(code -101)也会回 wbi_img,所以不需要账号/AppId。
+     * 匹配策略:片名+集数搜 → 逐个看 view 的 pages(合集一集一个 P) → 时长校正 → 取该集 cid。 */
+    private static final int[] BILI_TAB = {46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52};
+    private static final java.util.regex.Pattern DM_DENY =
+        java.util.regex.Pattern.compile("(解说|解析|影评|盘点|混剪|花絮|预告|片花|OST|主题曲|歌曲|音乐|有声|小说|合集|完整版)");
+    private static String biliCookie = "", biliMixin = "";
+    private static long biliAt = 0;
+    private static String lastDmMatch = "";
+
+    private static String md5Hex(String s) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+        byte[] d = md.digest(s.getBytes("utf-8"));
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < d.length; i++) b.append(String.format("%02x", d[i]));
+        return b.toString();
+    }
+
+    private static String urlEnc(String s) throws Exception {
+        return java.net.URLEncoder.encode(s, "utf-8").replace("+", "%20");
+    }
+
+    private static void bLog(String m) { android.util.Log.i("TVSRV", "[dm] " + m); }
+
+    private static HttpURLConnection biliConn(String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(6000);
+        c.setReadTimeout(15000);
+        c.setRequestProperty("User-Agent", UA_PC);
+        c.setRequestProperty("Referer", "https://www.bilibili.com/");
+        if (!biliCookie.isEmpty()) c.setRequestProperty("Cookie", biliCookie);
+        return c;
+    }
+
+    private static String biliGet(String url) throws Exception {
+        long t0 = System.currentTimeMillis();
+        try {
+            HttpURLConnection c = biliConn(url);
+            int code = c.getResponseCode();
+            InputStream is = (code >= 400 && c.getErrorStream() != null) ? c.getErrorStream() : c.getInputStream();
+            String s = readAll(is);
+            bLog("GET " + url + " -> " + code + " " + (System.currentTimeMillis() - t0) + "ms len=" + s.length());
+            return s;
+        } catch (Throwable t) {
+            bLog("GET FAIL " + url + " " + (System.currentTimeMillis() - t0) + "ms " + t);
+            throw t;
+        }
+    }
+
+    private static byte[] biliGetBytes(String url) throws Exception {
+        long t0 = System.currentTimeMillis();
+        try {
+            HttpURLConnection c = biliConn(url);
+            int code = c.getResponseCode();
+            InputStream is = (code >= 400 && c.getErrorStream() != null) ? c.getErrorStream() : c.getInputStream();
+            byte[] b = readAllBytes(is);
+            bLog("GETB " + url + " -> " + code + " " + (System.currentTimeMillis() - t0) + "ms len=" + b.length);
+            return b;
+        } catch (Throwable t) {
+            bLog("GETB FAIL " + url + " " + (System.currentTimeMillis() - t0) + "ms " + t);
+            throw t;
+        }
+    }
+
+    private static void biliPrep() throws Exception {
+        if (!biliMixin.isEmpty() && System.currentTimeMillis() - biliAt < 30 * 60 * 1000) return;
+        String b3 = "";
+        try {
+            JSONObject spi = new JSONObject(biliGet("https://api.bilibili.com/x/frontend/finger/spi"));
+            b3 = spi.optJSONObject("data") == null ? "" : spi.optJSONObject("data").optString("b_3");
+        } catch (Throwable ignored) {}
+        if (!b3.isEmpty()) biliCookie = "buvid3=" + b3 + "; b_nut=" + (System.currentTimeMillis() / 1000);
+        JSONObject nav = new JSONObject(biliGet("https://api.bilibili.com/x/web-interface/nav"));
+        JSONObject img = nav.optJSONObject("data") == null ? null : nav.optJSONObject("data").optJSONObject("wbi_img");
+        if (img == null) throw new Exception("B站 wbi 密钥获取失败");
+        String iu = img.optString("img_url"), su = img.optString("sub_url");
+        String raw = iu.substring(iu.lastIndexOf('/') + 1).split("\\.")[0] + su.substring(su.lastIndexOf('/') + 1).split("\\.")[0];
+        if (raw.length() < 64) throw new Exception("B站 wbi 密钥格式异常");
+        StringBuilder mix = new StringBuilder();
+        for (int i = 0; i < BILI_TAB.length; i++) mix.append(raw.charAt(BILI_TAB[i]));
+        biliMixin = mix.substring(0, 32);
+        biliAt = System.currentTimeMillis();
+    }
+
+    private static String biliSigned(java.util.TreeMap<String, String> p) throws Exception {
+        p.put("wts", String.valueOf(System.currentTimeMillis() / 1000));
+        StringBuilder q = new StringBuilder();
+        for (String k : p.keySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(urlEnc(k)).append('=').append(urlEnc(p.get(k)));
+        }
+        return q + "&w_rid=" + md5Hex(q.toString() + biliMixin);
+    }
+
+    private static int cnNum(String s) {
+        String d = "零一二三四五六七八九";
+        int n = 0, cur = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            int di = d.indexOf(ch);
+            if (di >= 0) cur = di;
+            else if (ch == '十') { n += (cur == 0 ? 1 : cur) * 10; cur = 0; }
+            else if (ch == '百') { n += (cur == 0 ? 1 : cur) * 100; cur = 0; }
+            else if (ch == '两') cur = 2;
+            else return 0;
+        }
+        return n + cur;
+    }
+
+    private static int epNoOf(String t) {
+        if (t == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("第\\s*0*(\\d+)\\s*[集话話期]").matcher(t);
+        if (m.find()) { try { return Integer.parseInt(m.group(1)); } catch (Throwable ignored) {} }
+        m = java.util.regex.Pattern.compile("第\\s*([零一二三四五六七八九十百两]{1,5})\\s*[集话話期]").matcher(t);
+        if (m.find()) return cnNum(m.group(1));
+        return 0;
+    }
+
+    private static double durSec(String d) {
+        if (d == null || d.isEmpty()) return 0;
+        String[] a = d.split(":");
+        try {
+            if (a.length == 3) return Integer.parseInt(a[0].trim()) * 3600 + Integer.parseInt(a[1].trim()) * 60 + Integer.parseInt(a[2].trim());
+            if (a.length == 2) return Integer.parseInt(a[0].trim()) * 60 + Integer.parseInt(a[1].trim());
+            return Double.parseDouble(a[0].trim());
+        } catch (Throwable e) { return 0; }
+    }
+
+    private static boolean durClose(double a, double b, double tol) {
+        if (a <= 0 || b <= 0) return false;
+        return Math.abs(a - b) / Math.max(a, b) <= tol;
+    }
+
+    private static org.json.JSONArray biliSearch(String kw) throws Exception {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            java.util.TreeMap<String, String> p = new java.util.TreeMap<>();
+            p.put("search_type", "video");
+            p.put("keyword", kw);
+            p.put("page", "1");
+            String url = "https://api.bilibili.com/x/web-interface/wbi/search/type?" + biliSigned(p);
+            JSONObject j;
+            try { j = new JSONObject(biliGet(url)); }
+            catch (Throwable e) {
+                if (attempt == 0) { biliMixin = ""; try { biliPrep(); } catch (Throwable ignored) {} continue; }
+                return new org.json.JSONArray();
+            }
+            int code = j.optInt("code", 0);
+            if (code == -412 || code == -403) {
+                biliMixin = "";
+                try { biliPrep(); } catch (Throwable ignored) {}
+                continue;
+            }
+            JSONObject data = j.optJSONObject("data");
+            org.json.JSONArray arr = data == null ? null : data.optJSONArray("result");
+            return arr == null ? new org.json.JSONArray() : arr;
+        }
+        return new org.json.JSONArray();
+    }
+
+    /* 返回该集弹幕 XML;匹配不到返回 null(宁缺毋滥) */
+    /* ---------- 公益弹幕:弹弹play 兼容免凭证代理 ----------
+     * 链路(全部 GET,无需 AppId/Secret,代理侧自己完成弹弹play鉴权):
+     *   GET {base}/api/v2/search/anime?keyword=<片名>  → animes[0].animeId
+     *   GET {base}/api/v2/bangumi/{animeId}            → bangumi.episodes[] (episodeNumber/episodeTitle)
+     *   GET {base}/api/v2/comment/{episodeId}?withRelated=true&chConvert=1
+     * comments[].p = "秒,模式,颜色,用户hash"(与 B 站 XML p 属性兼容), .m = 弹幕文本。
+     * p 原样输出给前端 parseXML,不需要 shift 换算。 */
+    private static final String GY_BASE_DEFAULT = "https://danmaku-api.152468.xyz";
+
+    private static String gongyiDm(String name, String ep, String base) throws Exception {
+        if (base == null || base.trim().isEmpty()) base = GY_BASE_DEFAULT;
+        base = base.trim().replaceAll("/+$", "");
+        java.util.Map<String, String> h = new java.util.HashMap<>();
+        h.put("User-Agent", "AMUTV/1.4");
+        h.put("Accept", "application/json");
+        org.json.JSONObject s = new org.json.JSONObject(httpText("GET",
+            base + "/api/v2/search/anime?keyword=" + java.net.URLEncoder.encode(name, "utf-8"), null, h));
+        org.json.JSONArray as = s.optJSONArray("animes");
+        if (as == null || as.length() == 0) return null;
+        long aid = 0;
+        for (int i = 0; i < as.length() && i < 3; i++) {
+            org.json.JSONObject a0 = as.optJSONObject(i);
+            if (a0 != null && a0.optLong("animeId", 0) > 0) { aid = a0.optLong("animeId"); break; }
+        }
+        if (aid <= 0) return null;
+        org.json.JSONObject bg = new org.json.JSONObject(httpText("GET", base + "/api/v2/bangumi/" + aid, null, h))
+            .optJSONObject("bangumi");
+        if (bg == null) return null;
+        org.json.JSONArray eps = bg.optJSONArray("episodes");
+        if (eps == null || eps.length() == 0) return null;
+        int want = epNoOf(ep);
+        org.json.JSONObject pick = null;
+        for (int i = 0; i < eps.length(); i++) {
+            org.json.JSONObject e0 = eps.optJSONObject(i);
+            if (e0 == null) continue;
+            int n = 0;
+            try { n = Integer.parseInt(e0.optString("episodeNumber", "").trim()); } catch (Exception ignored) {}
+            if (n <= 0) n = epNoOf(e0.optString("episodeTitle", ""));
+            if (want > 0 && n == want) { pick = e0; break; }
+        }
+        if (pick == null && want > 0 && eps.length() >= want) pick = eps.optJSONObject(want - 1);
+        if (pick == null && want <= 0) pick = eps.optJSONObject(0);
+        if (pick == null) return null;
+        long eid = pick.optLong("episodeId", 0);
+        if (eid <= 0) return null;
+        lastDmMatch = bg.optString("animeTitle", "") + " · " + pick.optString("episodeTitle", "");
+        org.json.JSONObject cc = new org.json.JSONObject(httpText("GET",
+            base + "/api/v2/comment/" + eid + "?withRelated=true&chConvert=1", null, h));
+        org.json.JSONArray cs = cc.optJSONArray("comments");
+        if (cs == null || cs.length() == 0) return null;
+        StringBuilder b = new StringBuilder("<?xml version=\"1.0\"?><i>");
+        for (int i = 0; i < cs.length(); i++) {
+            org.json.JSONObject cm = cs.optJSONObject(i);
+            if (cm == null) continue;
+            String p = cm.optString("p", "").trim();
+            String m = cm.optString("m", "").trim();
+            if (!p.isEmpty() && !m.isEmpty()) {
+                b.append("<d p=\"").append(esc(p)).append("\">").append(esc(m)).append("</d>");
+            }
+        }
+        return b.append("</i>").toString();
+    }
+
+    private static String biliDm(String name, String ep, double targetDur) throws Exception {
+        long t0 = System.currentTimeMillis();
+        biliPrep();
+        bLog("prep done " + (System.currentTimeMillis() - t0) + "ms cookie=" + (biliCookie.isEmpty() ? "empty" : "set") + " mixin=" + (biliMixin.isEmpty() ? "empty" : "ok"));
+        final int epNo = epNoOf(ep);
+        java.util.LinkedHashSet<String> kws = new java.util.LinkedHashSet<>();
+        if (ep != null && ep.matches(".*第\\s*\\d+\\s*[集话話期].*")) kws.add((name + " " + ep).trim());
+        if (epNo > 0) kws.add(name + " 第" + epNo + "集");
+        kws.add(name);
+
+        java.util.List<JSONObject> cands = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String kw : kws) {
+            org.json.JSONArray arr = biliSearch(kw);
+            bLog("search \"" + kw + "\" -> " + (arr == null ? 0 : arr.length()) + " @" + (System.currentTimeMillis() - t0) + "ms");
+            for (int i = 0; arr != null && i < arr.length(); i++) {
+                JSONObject it = arr.optJSONObject(i);
+                if (it == null) continue;
+                String bv = it.optString("bvid");
+                if (bv.isEmpty() || seen.contains(bv)) continue;
+                seen.add(bv);
+                cands.add(it);
+            }
+            if (cands.size() >= 12) break;
+        }
+        if (cands.isEmpty()) return null;
+
+        final double td = targetDur;
+        Collections.sort(cands, new java.util.Comparator<JSONObject>() {
+            public int compare(JSONObject a, JSONObject b) {
+                int ta = (epNo > 0 && epNoOf(a.optString("title")) == epNo) ? 1 : 0;
+                int tb = (epNo > 0 && epNoOf(b.optString("title")) == epNo) ? 1 : 0;
+                if (ta != tb) return tb - ta;
+                if (td > 0) {
+                    double fa = Math.abs(durSec(a.optString("duration")) - td) / td;
+                    double fb = Math.abs(durSec(b.optString("duration")) - td) / td;
+                    if (Math.abs(fa - fb) > 0.2) return fa < fb ? -1 : 1;
+                }
+                return b.optLong("play") > a.optLong("play") ? 1 : -1;
+            }
+        });
+
+        double bestSc = -1;
+        String bestCid = null, bestTitle = "", bestTag = "";
+        double bestDur = 0;
+        for (int i = 0; i < cands.size() && i < 6; i++) {
+            JSONObject it = cands.get(i);
+            String title = it.optString("title").replaceAll("<[^>]+>", "");
+            int titleEp = epNoOf(title);
+            String bv = it.optString("bvid");
+            if (bv.isEmpty()) continue;
+            JSONObject data;
+            try { data = new JSONObject(biliGet("https://api.bilibili.com/x/web-interface/view?bvid=" + bv)).optJSONObject("data"); }
+            catch (Throwable e) { continue; }
+            if (data == null) continue;
+            org.json.JSONArray pages = data.optJSONArray("pages");
+            String cid = null, tag = "";
+            double sc = -1, pdur = 0;
+            if (pages != null && pages.length() > 1) {
+                JSONObject pg = null;
+                if (epNo > 0) {
+                    for (int k = 0; k < pages.length(); k++) {
+                        JSONObject o = pages.optJSONObject(k);
+                        if (o != null && epNoOf(o.optString("part")) == epNo) { pg = o; break; }
+                    }
+                    if (pg == null && pages.length() >= epNo) pg = pages.optJSONObject(epNo - 1);
+                }
+                if (pg == null && td > 0) {
+                    double bd = -1;
+                    for (int k = 0; k < pages.length(); k++) {
+                        JSONObject o = pages.optJSONObject(k);
+                        if (o == null) continue;
+                        double diff = Math.abs(o.optDouble("duration") - td);
+                        if (bd < 0 || diff < bd) { bd = diff; pg = o; }
+                    }
+                }
+                if (pg == null) continue;
+                pdur = pg.optDouble("duration");
+                if (td > 0 && !durClose(pdur, td, 0.15)) continue;
+                cid = pg.optString("cid");
+                int pno = pg.optInt("page", 1);
+                tag = pno > 1 ? " · P" + pno : "";
+                sc = 2 + (td > 0 ? (1 - Math.abs(pdur - td) / td) : 0.5);
+                if (epNo > 0 && epNoOf(pg.optString("part")) == epNo) sc += 1;
+            } else {
+                if (epNo > 0 && titleEp != epNo) continue;
+                if (DM_DENY.matcher(title).find()) continue;
+                double vd = data.optDouble("duration");
+                if (td > 0 && !durClose(vd, td, 0.15)) continue;
+                cid = data.optString("cid");
+                pdur = vd;
+                sc = 2 + (td > 0 ? (1 - Math.abs(vd - td) / td) : 0.3) + (epNo > 0 && titleEp == epNo ? 1.2 : 0);
+            }
+            if (cid == null || cid.isEmpty()) continue;
+            if (sc > bestSc) { bestSc = sc; bestCid = cid; bestTitle = title; bestTag = tag; bestDur = pdur; }
+        }
+        if (bestCid == null) { bLog("no match, total " + (System.currentTimeMillis() - t0) + "ms"); return null; }
+        bLog("best=" + bestTitle + bestTag + " cid=" + bestCid + " @" + (System.currentTimeMillis() - t0) + "ms, fetching list.so");
+        String xml = inflateText(biliGetBytes("https://api.bilibili.com/x/v1/dm/list.so?oid=" + bestCid));
+        bLog("list.so done, xml=" + xml.length() + " @" + (System.currentTimeMillis() - t0) + "ms");
+        if (!xml.contains("<d p=")) return null;
+        lastDmMatch = bestTitle + bestTag + (bestDur > 0 ? " · " + Math.round(bestDur / 60) + "分" : "");
+        return xml;
+    }
+
+    /* dm/list.so 固定回 deflate,Java 不会自动解,这里两种都试一遍 */
+    private static String inflateText(byte[] data) {
+        String s = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+        if (s.trim().startsWith("<")) return s;
+        for (int raw = 0; raw < 2; raw++) {
+            try {
+                java.util.zip.Inflater inf = new java.util.zip.Inflater(raw == 1);
+                inf.setInput(data);
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[65536];
+                while (!inf.finished()) {
+                    int n = inf.inflate(buf);
+                    if (n == 0) break;
+                    bo.write(buf, 0, n);
+                }
+                inf.end();
+                String out = new String(bo.toByteArray(), "utf-8");
+                if (out.contains("<")) return out;
+            } catch (Throwable ignored) {}
+        }
+        return s;
     }
 }

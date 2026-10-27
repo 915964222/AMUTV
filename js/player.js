@@ -34,6 +34,8 @@ const Player = (() => {
   /* ---------- 外挂字幕:抓取文本 → addTextTrack(模块层) ---------- */
   let subsLoading = false;
   let dm = null; // 弹幕渲染器(设置抽屉创建,exit 统一销毁)
+  const dmMem = {};        // 本集弹幕内存缓存:片名|集 → {items, matched, from}
+  let dmLastNote = '';     // 面板里展示「来源 / 匹配到哪一集 / 条数」
 
   /* ---------- 字幕样式(自定义渲染 overlay):字号/描边/背景不透明度 ---------- */
   function subStyle() {
@@ -364,6 +366,7 @@ const Player = (() => {
       // 开始播放后清掉残留的失败提示
       const c = root.querySelector('.pl-center');
       if (c && c.textContent.includes('失败')) showCenter('');
+      autoLoadDm();   // 开片自动拉这一集的弹幕(匹配不到就静默跳过)
     });
     video.addEventListener('pause', onPauseEv);
     window.addEventListener('beforeunload', saveProgress);
@@ -454,6 +457,8 @@ const Player = (() => {
 
     state.groupIndex = gi; state.epIndex = ei;
     state._outroFired = false;
+    state._dmKey = '';       // 换集了,弹幕要重新匹配
+    if (dm) { try { dm.setItems([]); } catch (_e) {} }
     state._stallHealed = false;
     state._marksDone = false;
     state._resumeAt = ''; state._resumeSec = 0;
@@ -956,8 +961,63 @@ const Player = (() => {
     dm.setOpacity(typeof saved.opacity === 'number' ? saved.opacity : 0.85);
     dm.setFontScale(typeof saved.fontScale === 'number' ? saved.fontScale : 1);
     dm.setSpeed(saved.speed); // setSpeed 内部对非法值兜底为1
-    dm.setOn(saved.on && !!saved.text);
+    dm.setOn(saved.on !== false);   // 有没有内容另说,开关状态照旧
     if (saved.text) { try { dm.setItems(window.Danmaku.parseXML(saved.text)); } catch (e) {} }
+  }
+
+  /* ---------- 自动获取弹幕 ----------
+   * 片名 + 集数 + 实际片长交给服务端匹配(自定义模板 → 弹弹play → B站内置)。
+   * 匹配不到就静默放弃:宁可没弹幕,也别把别的集/解说视频的弹幕糊上来。 */
+  function dmAutoOn() { return DB.getConfig().dmAuto !== false; }
+
+  function dmEpInfo() {
+    if (!state || !state.groups) return null;
+    const g = state.groups[state.groupIndex] || { eps: [] };
+    const ep = g.eps[state.epIndex] || {};
+    const name = String(state.name || state.title || '').replace(/\s*·\s*.*$/, '').trim();
+    if (!name) return null;
+    const epName = String(ep.name || ('第' + (state.epIndex + 1) + '集'));
+    return { name: name, ep: epName, key: name + '|' + epName };
+  }
+
+  function dmApplyCached(key) {
+    const hit = dmMem[key];
+    if (!hit) return false;
+    ensureDanmaku();
+    if (!dm) return false;
+    dm.setItems(hit.items);
+    dm.setOn(true);
+    dmLastNote = '弹幕 ' + hit.items.length + ' 条 · ' + hit.srcNote;
+    updateDmBtn();
+    return true;
+  }
+
+  function autoLoadDm() {
+    if (!dmAutoOn() || !window.Danmaku || !state) return;
+    const info = dmEpInfo();
+    if (!info) return;
+    ensureDanmaku();
+    if (!dm) return;
+    if (dmApplyCached(info.key)) return;
+    if (state._dmKey === info.key) return;      // 这一集已经请求过(成功或失败都不再重试)
+    state._dmKey = info.key;
+    const dur = video && isFinite(video.duration) ? video.duration : 0;
+    window.Danmaku.fetchOnline(info.ep, { name: info.name, ep: info.ep, duration: dur }).then(function (r) {
+      if (!r.items.length) throw new Error('接口没有返回弹幕');
+      const fromName = r.from === 'bilibili' ? 'B站' : r.from === 'dandanplay' ? '弹弹play' : '自定义接口';
+      dmMem[info.key] = { items: r.items, srcNote: fromName + (r.matched ? '｜' + r.matched : '') };
+      /* 请求期间用户可能已经换了集,只有还在同一集才套用 */
+      const now = dmEpInfo();
+      if (!now || now.key !== info.key) return;
+      dm.setItems(r.items);
+      dm.setOn(true);
+      dmLastNote = '弹幕 ' + r.items.length + ' 条 · ' + dmMem[info.key].srcNote;
+      updateDmBtn();
+      if (window.toast) toast(dmLastNote);
+    }).catch(function (e) {
+      dmLastNote = '自动获取失败:' + (e.message || e);
+      if (window.toast) toast('弹幕未加载 · ' + (e.message || e));
+    });
   }
   function saveDm() {
     if (!dm) return;
@@ -1581,20 +1641,36 @@ const Player = (() => {
     const onB = el('<button class="ep' + (dm.state.on ? ' current' : '') + '" data-f tabindex="-1">' + (dm.state.on ? '弹幕 开' : '弹幕 关') + '</button>');
     onB.onclick = function () { dm.setOn(!dm.state.on); saveDm(); updateDmBtn(); renderMediaTab(d); };
     dg.appendChild(onB);
-    /* 在线弹幕:按当前文件名从弹幕接口拉取(接口在「设置」页配置) */
-    const dmoB = el('<button class="ep" data-f tabindex="-1">🌐 在线弹幕</button>');
+    /* 自动获取:开片就按「片名 + 集数 + 片长」匹配(默认开) */
+    const autoB = el('<button class="ep' + (dmAutoOn() ? ' current' : '') + '" data-f tabindex="-1">自动 ' + (dmAutoOn() ? '开' : '关') + '</button>');
+    autoB.onclick = function () {
+      DB.setConfig({ dmAuto: !dmAutoOn() });
+      if (window.toast) toast(dmAutoOn() ? '已开启:开片自动匹配弹幕' : '已关闭自动匹配弹幕');
+      if (dmAutoOn()) { if (state) state._dmKey = ''; autoLoadDm(); }
+      renderMediaTab(d);
+    };
+    dg.appendChild(autoB);
+    /* 手动重新匹配:自动没匹配上、或想换一个来源时用 */
+    const dmoB = el('<button class="ep" data-f tabindex="-1">🌐 重新匹配弹幕</button>');
     dmoB.onclick = function () {
+      const info = dmEpInfo();
+      if (!info) return;
+      state._dmKey = '';
+      delete dmMem[info.key];
       dmoB.textContent = '匹配中…';
-      const epName = ((state.groups[state.groupIndex].eps[state.epIndex] || {}).name || '') + '';
-      Danmaku.fetchOnline(epName).then(function (r) {
-        if (!r.items.length) throw new Error('接口没有返回弹幕');
+      const dur = video && isFinite(video.duration) ? video.duration : 0;
+      Danmaku.fetchOnline(info.ep, { name: info.name, ep: info.ep, duration: dur }).then(function (r) {
+        if (!r.items.length) throw new Error('没匹配到这一集的弹幕');
+        const fromName = r.from === 'bilibili' ? 'B站' : r.from === 'dandanplay' ? '弹弹play' : '自定义接口';
+        dmMem[info.key] = { items: r.items, srcNote: fromName + (r.matched ? '｜' + r.matched : '') };
         dm.setItems(r.items);
         dm.setOn(true);
+        dmLastNote = '弹幕 ' + r.items.length + ' 条 · ' + dmMem[info.key].srcNote;
         updateDmBtn();
-        if (window.toast) toast('弹幕已加载:' + (r.matched || r.items.length + ' 条'));
+        if (window.toast) toast(dmLastNote);
         renderMediaTab(d);
       }).catch(function (e) {
-        dmoB.textContent = '🌐 在线弹幕(重试)';
+        dmoB.textContent = '🌐 重新匹配弹幕';
         if (window.toast) toast('弹幕获取失败:' + (e.message || e));
       });
     };
@@ -1636,7 +1712,10 @@ const Player = (() => {
     };
     dg.appendChild(fileB);
     body.appendChild(dg);
-    body.appendChild(el('<div class="hint">弹幕文件:B站格式 XML(弹弹play 兼容),加载后本片自动记忆</div>'));
+    body.appendChild(el('<div class="hint">' + (dmLastNote ? '当前:' + dmLastNote + '<br>' : '') +
+      '自动匹配按「片名 + 第几集 + 实际片长」找,B站没有对应集时会留空(不拿别的集的弹幕凑数)。' +
+      '想覆盖国产剧/院线片,到「设置 → 弹幕接口」填弹弹play 的 AppId / AppSecret 更准。' +
+      '本地文件也可以直接加载 B站格式 XML。</div>'));
   }
 
   /* ---------- 失败自动换源(返回 true 表示已接管) ---------- */
@@ -1935,6 +2014,18 @@ const Player = (() => {
   }
   function close(silent) { if (root) exit(); else if (silent) {} }
 
+  /* 遥控器「返回」键(原生 onBackPressed 打进来的那一层):
+   * 选集/换源/设置/嗅探这些抽屉开着时,先关抽屉;没抽屉才告诉调用方可以退播放。
+   * 桌面端的 Esc/Backspace 走 keydown 自己处理,这条是给遥控器补的。 */
+  function back() {
+    if (!root) return false;
+    const p = root.querySelector('.pl-strip, .pl-drawer');
+    if (!p) return false;
+    closePanels();
+    wake();
+    return true;
+  }
+
   function isOpen() { return !!root; }
 
   /* 语音控制入口:复用遥控协议的执行器,并暴露只读状态供增量指令(音量±/快进±)计算 */
@@ -1952,5 +2043,5 @@ const Player = (() => {
     };
   }
 
-  return { open, close, isOpen, ctrl: rcExec, getState: getState };
+  return { open, close, isOpen, back, ctrl: rcExec, getState: getState };
 })();
