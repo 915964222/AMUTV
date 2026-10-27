@@ -1647,6 +1647,27 @@ body.osk-on #view { padding-bottom: 340px; }
 @media (max-width: 760px) { .ali-qr { width: 200px; height: 200px; } }
 @media (min-width: 1280px) { .ali-qr { width: 288px; height: 288px; } }
 
+/* 电视离沙发 2~3 米,248px 的码手机很难对焦:点一下放大到 420px */
+.ali-qr { cursor: pointer; transition: width .18s ease, height .18s ease; }
+.ali-qr.big { width: 420px !important; height: 420px !important; }
+.ali-qr.big ~ .ali-st { max-width: 420px; }
+
+/* 「必须用 App 扫」这条以前是灰色小字,被无视了 —— 提成醒目提示块 */
+.ali-warn {
+  margin-top: 12px; padding: 10px 13px; border-radius: 10px;
+  background: rgba(255, 179, 0, .12); border: 1px solid rgba(255, 179, 0, .38);
+  color: #ffcf7a; font-size: 13px; line-height: 1.8;
+}
+.ali-warn strong { color: #ffe6b8; font-weight: 800; }
+
+/* 25 秒没扫上才出现的诊断提示(扫错工具时手机上只剩一张图片) */
+.ali-tip {
+  display: none; margin-top: 12px; padding: 10px 13px; border-radius: 10px;
+  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .16);
+  font-size: 13px; line-height: 1.8; color: var(--text);
+}
+.ali-tip b { font-weight: 800; color: var(--accent); }
+
 /* ============ 详情页返回按钮(遥控器只有一个返回键,详情页原来没有出口) ============ */
 .detail-back {
   position: fixed; top: 74px; left: 22px; z-index: 60;
@@ -1731,6 +1752,11 @@ body.osk-on #view { padding-bottom: 340px; }
   background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .12); color: var(--text);
 }
 .vc-input:focus { outline: none; box-shadow: var(--focus-ring); }
+
+/* 云端识别配置:地址 / Key / 模型 三行 + 保存,竖排避免在 1080p 上挤成一条 */
+.vc-asr { display: none; flex-direction: column; gap: 8px; }
+.vc-asr .vc-input { font-size: 14px; padding: 10px 12px; }
+.vc-asr .vc-b { align-self: flex-end; padding: 8px 16px; font-size: 13px; }
 
 .vc-help { display: none; background: rgba(255, 255, 255, .04); border-radius: 12px; padding: 10px 14px; }
 .vc-hrow { display: flex; gap: 10px; font-size: 13px; line-height: 1.9; }

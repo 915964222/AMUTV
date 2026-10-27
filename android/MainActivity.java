@@ -27,12 +27,28 @@ public class MainActivity extends Activity {
     private int voiceLangIdx = 0;
     private int voiceRetried = 0;   /* ERROR_CLIENT(识别器实例失效)重建重试次数 */
     private boolean voiceExt = false; /* 本次是否走的是「外部识别界面」回退通路 */
+    private boolean recPending = false; /* 录音权限申请中:授予后自动接着录 */
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         MiniServer.start(this);   // 局域网遥控/推送/云盘中转(0.0.0.0:9978)
         SysCtl.setActivity(this); // WiFi/蓝牙:运行时权限与系统弹窗需要 Activity
+
+        /* 通用录音:录完把结果交给网页。设备没有 RecognitionService 时,
+         * 网页自己把这段 WAV 发给云端 ASR —— 只要有麦克风就能用。 */
+        VoiceRec.setCb(new VoiceRec.Cb() {
+            public void onDone(org.json.JSONObject r) {
+                if (wv == null) return;
+                final String js = "window.__onRec&&window.__onRec("
+                        + org.json.JSONObject.quote(r.toString()) + ")";
+                wv.post(new Runnable() {
+                    public void run() {
+                        try { if (wv != null) wv.evaluateJavascript(js, null); } catch (Throwable t) {}
+                    }
+                });
+            }
+        });
 
         /* U盘/存储插拔监听:即插即播,挂载/卸载时通知网页(运行期注册在 Android 11+ 仍可收到) */
         try {
@@ -169,6 +185,27 @@ public class MainActivity extends Activity {
             /* 语音能力体检:真机上「说不出字」时先看这个,能直接区分是没服务、没权限还是没麦克风 */
             @android.webkit.JavascriptInterface
             public String voiceInfo() { return MainActivity.this.voiceInfo(); }
+
+            /* ---- 通用录音通路(不依赖任何系统识别服务) ----
+             * recStart 返回 {ok,rate,msg};录音结束异步回调 window.__onRec({ok,ms,bytes,peak,silent,file})。
+             * 音频由 MiniServer 的 /voice/wav 取(仅 loopback),网页拿到后自行发云端 ASR。 */
+            @android.webkit.JavascriptInterface
+            public String recStart() { return MainActivity.this.startRecSync(); }
+
+            @android.webkit.JavascriptInterface
+            public String recStop() { return VoiceRec.stop().toString(); }
+
+            @android.webkit.JavascriptInterface
+            public String recState() { return VoiceRec.state().toString(); }
+
+            /* 把刚录的 WAV 发到云端 ASR。必须走原生:file:// 页面跨域 POST 会被 CORS 挡掉,
+             * 而官方 OpenAI/讯飞/阿里 都不返回 CORS 头,网页 fetch 必然失败。
+             * 结果异步回调 window.__onAsr({ok,code,text,err}),text 是原始响应体。 */
+            @android.webkit.JavascriptInterface
+            public String asrUpload(String url, String key, String model, String lang) {
+                MainActivity.this.doAsrUpload(url, key, model, lang);
+                return "{\"ok\":true,\"async\":true}";
+            }
         }, "YSTV");
         wv.loadUrl(INDEX_URL);
         setContentView(wv);
@@ -225,6 +262,20 @@ public class MainActivity extends Activity {
         /* 录音权限:授予后立刻开始识别,不授予就明确告诉网页 */
         if (req == 9002) {
             boolean granted = res.length > 0 && res[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            /* 走通用录音通路申请的权限:授予后直接开录,不要又跳回系统识别 */
+            if (recPending) {
+                recPending = false;
+                String r = granted
+                        ? VoiceRec.start(getApplicationContext()).toString()
+                        : "{\"ok\":false,\"err\":\"noperm\",\"msg\":\"录音权限被拒绝\"}";
+                if (wv != null) {
+                    try {
+                        wv.evaluateJavascript("window.__onRecPerm&&window.__onRecPerm("
+                                + org.json.JSONObject.quote(r) + ")", null);
+                    } catch (Throwable ignored) {}
+                }
+                return;
+            }
             /* 授权后回统一入口重新判断:直接 doStartVoice 会绕过「服务可用性/外部语音 App」两条回退 */
             if (granted) startVoice();
             else voiceEvent("error", null, "需要麦克风权限才能语音");
@@ -258,6 +309,41 @@ public class MainActivity extends Activity {
                 }
             });
         } catch (Throwable t) {}
+    }
+
+    /* ==================== 通用录音 ====================
+     * 设备没有 RecognitionService(国产盒子/无 GMS)时,系统级识别彻底没戏;
+     * 但只要麦克风还能出声,自己录下来交给云端 ASR 就能用 —— 这才是「通用」的路子。
+     */
+    private String startRecSync() {
+        if (!VoiceRec.hasPerm(this)) {
+            recPending = true;
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    try {
+                        requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 9002);
+                    } catch (Throwable t) {}
+                }
+            });
+            return "{\"ok\":false,\"err\":\"noperm\",\"asking\":true,\"msg\":\"正在申请录音权限\"}";
+        }
+        return VoiceRec.start(getApplicationContext()).toString();
+    }
+
+    /* 云端 ASR:上传放到后台线程,结果回网页解析(前端已兼容 Whisper/国内各家格式) */
+    private void doAsrUpload(String url, String key, String model, String lang) {
+        VoiceAsr.upload(getApplicationContext(), url, key, model, lang, new VoiceAsr.Cb() {
+            public void onDone(org.json.JSONObject r) {
+                if (wv == null) return;
+                final String js = "window.__onAsr&&window.__onAsr("
+                        + org.json.JSONObject.quote(r.toString()) + ")";
+                wv.post(new Runnable() {
+                    public void run() {
+                        try { if (wv != null) wv.evaluateJavascript(js, null); } catch (Throwable t) {}
+                    }
+                });
+            }
+        });
     }
 
     private void startVoice() {
@@ -546,15 +632,40 @@ public class MainActivity extends Activity {
     }
 
     /* 返回键:先交给网页处理(收键盘/关播放器/关弹窗/回首页),网页说没处理才退出。
-     * 单页应用没有浏览历史,以前直接 goBack() 会变成一按返回就退出应用。 */
+     * 单页应用没有浏览历史,以前直接 goBack() 会变成一按返回就退出应用。
+     * 网页是异步回话的:WebView 崩溃/页面还没加载完时可能永远不回话,
+     * 所以加 700ms 超时兜底 —— 否则表现就是「返回键彻底没反应」,比退出还难受。 */
+    private boolean backPending = false;
+    private final android.os.Handler hMain = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable backTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (!backPending) return;
+            backPending = false;
+            android.util.Log.w("TVDBG", "back: 网页 700ms 未回话,走原生兜底");
+            try {
+                if (wv != null && wv.canGoBack()) wv.goBack();
+                else MainActivity.super.onBackPressed();
+            } catch (Throwable t) {
+                MainActivity.super.onBackPressed();
+            }
+        }
+    };
+
     @Override
     public void onBackPressed() {
         if (wv == null) { super.onBackPressed(); return; }
+        if (backPending) return;   // 上一次判定还没回来,忽略抖动连按
+        backPending = true;
+        hMain.postDelayed(backTimeout, 700);
         try {
             wv.evaluateJavascript(
                 "(function(){try{return window.__onBack?window.__onBack():0}catch(e){return 0}})()",
                 new android.webkit.ValueCallback<String>() {
                     public void onReceiveValue(String v) {
+                        if (!backPending) return;
+                        backPending = false;
+                        hMain.removeCallbacks(backTimeout);
                         boolean handled = v != null && v.indexOf('1') >= 0;
                         if (handled) return;
                         try {
@@ -566,6 +677,8 @@ public class MainActivity extends Activity {
                     }
                 });
         } catch (Throwable t) {
+            backPending = false;
+            hMain.removeCallbacks(backTimeout);
             super.onBackPressed();
         }
     }
