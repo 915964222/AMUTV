@@ -4,8 +4,10 @@
 (function () {
   'use strict';
   const CACHE = {}; // kind → {access_token, drive_id, exp}
-  /* 安卓 App(file://源)时云盘接口走本机内置服务器 */
-  const SRV = location.protocol === 'file:' ? 'http://127.0.0.1:9978' : '';
+  /* 安卓 App(file://源)时云盘接口走本机内置服务器。
+     用 localhost 而非 127.0.0.1:Chromium 按 host 分连接池(每 host 6 条),
+     /cloud/ali/poll 长轮询会占住连接,与 API 主池(127.0.0.1)隔离避免饿死 sniff2/proxy */
+  const SRV = location.protocol === 'file:' ? 'http://localhost:9978' : '';
 
   const Cloud = {
     list: function () { try { return DB.getConfig().clouds || []; } catch (e) { return []; } },

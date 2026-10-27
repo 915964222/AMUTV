@@ -35,9 +35,12 @@ cd build
 cd ..
 
 echo [6/6] apksigner sign...
-if not exist build\debug.keystore "%JDK%\bin\keytool.exe" -genkeypair -keystore build\debug.keystore -storepass android -keypass android -alias tv -dname "CN=yingshi" -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12 2>nul
-call "%BT%\apksigner.bat" sign --ks build\debug.keystore --ks-pass pass:android --out yingshi-tv.apk build\aligned.apk || goto :err
+rem 使用仓库根目录的持久签名文件 tv-debug.keystore(build 目录会被清空,不能把 keystore 放里面)
+if not exist tv-debug.keystore "%JDK%\bin\keytool.exe" -genkeypair -keystore tv-debug.keystore -storepass android -keypass android -alias tv -dname "CN=yingshi" -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12 2>nul
+call "%BT%\apksigner.bat" sign --ks tv-debug.keystore --ks-pass pass:android --out yingshi-tv.apk build\aligned.apk || goto :err
 call "%BT%\apksigner.bat" verify yingshi-tv.apk && echo [OK] APK built: yingshi-tv.apk
+copy /y yingshi-tv.apk amutv.apk >nul
+echo [OK] APK copied: amutv.apk
 exit /b 0
 :err
 echo [BUILD FAILED]

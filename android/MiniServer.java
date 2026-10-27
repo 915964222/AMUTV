@@ -447,9 +447,11 @@ public class MiniServer {
                 body = decodeText(data);
                 break;
             }
-            /* 目标本身就是媒体文件 → 已是直链 */
+            /* 目标本身就是媒体文件 → 已是直链;顺带探测真实高度,前端据此排档/显示徽标 */
             if (ctype.contains("mpegurl") || ctype.contains("video/mp4") || ctype.contains("application/x-mpegurl")) {
-                json(sk, 200, "{\"ok\":true,\"direct\":true,\"urls\":[\"" + jsonEsc(finalUrl) + "\"]}");
+                int dh = finalUrl.toLowerCase().contains(".m3u8") ? probeResolution(finalUrl, ref) : 0;
+                json(sk, 200, "{\"ok\":true,\"direct\":true,\"urls\":[\"" + jsonEsc(finalUrl) + "\"],\"quality\":["
+                        + dh + "],\"page\":\"" + jsonEsc(finalUrl) + "\"}");
                 return;
             }
             List<String> cands = new ArrayList<String>();
@@ -462,11 +464,31 @@ public class MiniServer {
                 json(sk, 200, "{\"ok\":false,\"error\":\"no media url found\"}");
                 return;
             }
+            /* 分辨率感知排序:1080P 优先,其次更高清,最后未知 */
+            int n = ok.size();
+            int[] heights = new int[n];
+            for (int i = 0; i < n; i++) {
+                String cu = ok.get(i);
+                heights[i] = cu.toLowerCase().matches("(?i).*\\.m3u8(\\?.*)?$") ? probeResolution(cu, ref) : 0;
+            }
+            for (int i = 0; i < n - 1; i++) {
+                for (int j = i + 1; j < n; j++) {
+                    if (heights[j] > heights[i]) {
+                        int th = heights[i]; heights[i] = heights[j]; heights[j] = th;
+                        String ts = ok.get(i); ok.set(i, ok.get(j)); ok.set(j, ts);
+                    }
+                }
+            }
             StringBuilder sb = new StringBuilder();
             sb.append("{\"ok\":true,\"urls\":[");
             for (int i = 0; i < ok.size(); i++) {
                 if (i > 0) sb.append(",");
                 sb.append("\"").append(jsonEsc(ok.get(i))).append("\"");
+            }
+            sb.append("],\"quality\":[");
+            for (int i = 0; i < heights.length; i++) {
+                if (i > 0) sb.append(",");
+                sb.append(heights[i]);
             }
             sb.append("],\"page\":\"").append(jsonEsc(finalUrl)).append("\"}");
             json(sk, 200, sb.toString());
@@ -538,6 +560,40 @@ public class MiniServer {
             return false;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /* 读取 m3u8 头,返回最高分辨率高度(px);读不到返回 0
+       注意:很多源写 RESOLUTION=1080x608(宽 1080 高 608),这是伪 1080,
+       真实像素高度只有 608(约 480p)。所以只用高度判档位,宽度会骗人。 */
+    private static int probeResolution(String u, String ref) {
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(10000);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", UA_PC);
+            c.setRequestProperty("Accept", "*/*");
+            if (!ref.isEmpty()) c.setRequestProperty("Referer", ref);
+            int code = c.getResponseCode();
+            if (code >= 400) return 0;
+            InputStream is = c.getInputStream();
+            byte[] buf = new byte[8192];
+            int n = is.read(buf);
+            try { is.close(); } catch (Throwable ignored) {}
+            if (n <= 0) return 0;
+            String head = new String(buf, 0, n, "UTF-8");
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("RESOLUTION=\\d+x(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(head);
+            int best = 0;
+            while (m.find()) {
+                int h = 0;
+                try { h = Integer.parseInt(m.group(1)); } catch (Throwable ignored) {}
+                if (h > best) best = h;
+            }
+            return best;
+        } catch (Throwable t) {
+            return 0;
         }
     }
 

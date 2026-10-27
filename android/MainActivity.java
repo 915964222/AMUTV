@@ -59,6 +59,8 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setUserAgentString("Mozilla/5.0 (Linux; Android 12; SMART-TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36");
+        // DevTools 远程调试(测试/排障用;仅影响调试桥,不改变应用行为)
+        try { WebView.setWebContentsDebuggingEnabled(true); } catch (Throwable ignored) {}
         CookieManager.getInstance().setAcceptCookie(true);
 
         wv.setWebViewClient(new WebViewClient() {

@@ -37,10 +37,16 @@ const API = (() => {
    * 采集源的 play_url 常常是带广告的分享页(/share/xxx、/play/xxx),
    * 直接丢给 video 元素只会卡在 0:00。服务端抓页抽取直链,两端(MiniServer / server.js)行为一致。 */
   async function sniffResolve(url) {
-    if (!url || !/^https?:/i.test(url)) return '';
+    const r = await sniffDetail(url);
+    return r.url || '';
+  }
+
+  /* 解析分享页 → 直链 + 分辨率(高度 px)。服务端已按分辨率降序排好,
+     urls[0] 即最高清的一条;height=0 表示未知画质。 */
+  async function sniffDetail(url) {
+    if (!url || !/^https?:/i.test(url)) return { url: '', height: 0 };
     const target = LOCAL_SRV + '/sniff2?b=' + b64url(String(url).split('#')[0]);
     try {
-      console.log('[sniff] req', target);
       let timer = null;
       const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       if (ctrl) timer = setTimeout(() => ctrl.abort(), 15000);
@@ -49,15 +55,14 @@ const API = (() => {
         signal: ctrl ? ctrl.signal : undefined,
       });
       if (timer) clearTimeout(timer);
-      console.log('[sniff] status', r.status);
-      if (!r.ok) return '';
+      if (!r.ok) return { url: '', height: 0 };
       const j = await r.json();
-      console.log('[sniff] result', JSON.stringify(j).slice(0, 300));
-      if (!j || !j.ok || !j.urls || !j.urls.length) return '';
-      return j.urls[0] || '';
+      if (!j || !j.ok || !j.urls || !j.urls.length) return { url: '', height: 0 };
+      const q = j.quality && j.quality.length ? j.quality[0] : 0;
+      return { url: j.urls[0] || '', height: q || 0, all: j.urls, page: j.page || '' };
     } catch (e) {
-      console.log('[sniff] fail', (e && e.message) || e);
-      return '';
+      try { console.log('[sniff] fail', (e && e.message) || e); } catch (_e) {}
+      return { url: '', height: 0 };
     }
   }
 
@@ -588,7 +593,7 @@ const API = (() => {
   }
 
   return {
-    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll, sniffResolve,
+    proxied, picUrl, normItem, parsePlay, adapterOf, matchName, qualityRank, testSource, IN_APP, listDriveDirect, searchPinyinAll, sniffResolve, sniffDetail,
     home: (src) => realAdapter(src).home(src),
     category: (src, tid, pg) => realAdapter(src).category(src, tid, pg),
     detailOf, search: (src, wd, pg) => realAdapter(src).search(src, wd, pg),

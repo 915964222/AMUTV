@@ -61,7 +61,7 @@
 - **云盘 4K 识别**(蓝徽章),网页型地址**智能嗅探**(`/sniff/` 转换代理 + 四路钩子抓直链)
 
 ### 📱 多端与周边
-- **安卓 App**(`amutv.apk`,3.2MB):网页资源全内嵌 + MiniServer(9978)独立运行,**局域网浏览器访问 `http://<设备IP>:9978` 也能直接用**
+- **安卓 App**(`amutv.apk` 约 3.4MB,从 [Releases](https://github.com/915964222/AMUTV/releases/latest) 下载):网页资源全内嵌 + MiniServer(9978)独立运行,**局域网浏览器访问 `http://<设备IP>:9978` 也能直接用**
 - **桌面 App**(Electron):软解防闪退、崩溃自愈、错误落盘
 - **PWA**:可安装到桌面/主屏幕,UI 骨架离线可用
 - **手机遥控**:播放器二维码 → `/remote` 扫码遥控(seek/切集/音量);**扫码推送配置**导入源
@@ -73,7 +73,7 @@
 
 | 方式 | 操作 |
 |---|---|
-| 📱 **安卓** | 安装根目录 `amutv.apk`,完全独立运行不依赖电脑 |
+| 📱 **安卓** | 从 [Releases](https://github.com/915964222/AMUTV/releases/latest) 下载 `amutv.apk` 安装,完全独立运行不依赖电脑 |
 | 📦 **绿色包** | 下载 `amutv-web.zip` 解压,双击启动脚本即用(含服务器+全部网页资源,免装 Node 依赖) |
 | 🖥️ **桌面** | 双击 `启动影视TV.bat`(Electron 壳自动拉起内嵌服务器) |
 | 🌐 **浏览器** | `node server.js` → 打开 `http://localhost:9978`,支持 PWA 安装 |
@@ -100,7 +100,6 @@ tvbox-web/
 ├── css/style.css         纯黑海报墙主题
 ├── server.js             静态服务 + 代理 + WebDAV/Alist + 嗅探 + 字幕/弹幕中转(零依赖)
 ├── electron-main.js      桌面版 Electron 壳
-├── amutv.apk             安卓安装包(独立运行)
 ├── build-apk.bat         安卓打包脚本(工具链 %LOCALAPPDATA%\android-sdk-tmp)
 ├── prepare-assets.py     安卓资产拍平
 ├── gen-icon.py           小电视应用图标生成(PIL,全密度 mipmap + PWA)
@@ -116,7 +115,16 @@ tvbox-web/
 │   ├── subtitle.js       本地字幕探测
 │   ├── ad-rules.js       m3u8 广告过滤规则(双端共享)
 │   ├── ui.js / app.js    通用组件 / 路由与页面
+├── tools/
+│   ├── tv.sh             电视端 adb 统一入口(自动等设备就绪,杜绝 offline 丢事件)
+│   ├── adb-keepalive.sh  adb server 保活(后台任务)
+│   ├── probe1080.py      采集源真分辨率核验(TS → H.264 SPS 实测)
+│   └── test-builtin.js   源策略单测(node,假 localStorage)
+├── docs/tv-adb.md        电视端调试环境说明(点不动=offline 掉事件 的坑)
 └── android/              安卓壳(MainActivity + MiniServer)
 ```
+
+> 电视端调试请用 `bash tools/tv.sh <命令>`，不要裸调 `adb`：这个环境里 adb server 会被逐条回收，
+> 设备掉到 `offline` 时 `input` 事件会被静默丢弃（表现为“点了没反应”）。详见 [docs/tv-adb.md](docs/tv-adb.md)。
 
 > ⚠️ **免责声明**:本软件只提供聚合展示功能,所有资源均来自互联网公开内容,软件不参与任何资源的制作、上传、储存与下载等内容。本软件仅供个人学习交流参考,请于安装后 24 小时内自行删除。

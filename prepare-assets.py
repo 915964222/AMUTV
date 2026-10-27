@@ -25,7 +25,8 @@ DST = os.path.join(ROOT, 'android', 'assets-flat')
 TARGET = "es2015"
 
 COPY_ITEMS = ['index.html', 'remote.html', 'push.html', 'ad-rules.js',
-              'css', 'js', 'vendor', 'icons', 'media', 'manifest.json']
+              'css', 'js', 'vendor', 'icons', 'media', 'manifest.json',
+              'verify1080.html']
 
 
 def find_esbuild():
